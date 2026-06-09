@@ -133,6 +133,8 @@ namespace fpsan
                 F,
                 detail::payload_fma(
                     F::config, a.fpsan_payload(), b.fpsan_payload(), c.fpsan_payload()));
+        else if constexpr(F::is_algebraic)
+            return a * b + c; // exact and value-faithful: the algebra's own + and *
         else
             return F(static_cast<FT>(std::fma(static_cast<detail::compute_t<FT>>(a.to_float()),
                                               static_cast<detail::compute_t<FT>>(b.to_float()),
@@ -145,6 +147,10 @@ namespace fpsan
         if constexpr(F::semantics == Semantics::FPSan)
             return FPSAN_FROM_PAYLOAD(
                 F, detail::payload_srem(F::config, a.fpsan_payload(), b.fpsan_payload()));
+        else if constexpr(F::is_algebraic)
+            return FPSAN_FROM_PAYLOAD(
+                F, detail::alg_tagged2(F::alg_cfg(), a.fpsan_payload(), b.fpsan_payload(),
+                                       0x666D6F64ull /*"fmod"*/));
         else
             return F(static_cast<FT>(std::fmod(static_cast<detail::compute_t<FT>>(a.to_float()),
                                                static_cast<detail::compute_t<FT>>(b.to_float()))));
@@ -155,7 +161,11 @@ namespace fpsan
     FPSAN_HOST_DEVICE Value<FT, S, C> NAME(Value<FT, S, C> a, Value<FT, S, C> b)                 \
     {                                                                                            \
         using F = Value<FT, S, C>;                                                               \
-        if constexpr(F::semantics == Semantics::FPSan)                                           \
+        /* Both FPSan and the algebraic variants order by the signed integer value */            \
+        /* of the payload (Triton's min/max contract): deterministic, a.c.i., and  */            \
+        /* reassociation-invariant -- though not value-faithful, since a finite    */            \
+        /* field has no compatible order. */                                                     \
+        if constexpr(F::is_payload)                                                              \
             return FPSAN_FROM_PAYLOAD(                                                           \
                 F, detail::PAYLOAD_FN(F::config, a.fpsan_payload(), b.fpsan_payload()));         \
         else                                                                                     \

@@ -36,6 +36,17 @@ namespace fpsan
         {
             return To(static_cast<ToFT>(v.to_float()));
         }
+        else if constexpr(detail::is_algebraic_semantics(S))
+        {
+            // Algebraic variants: a per-width modulus makes casts un-faithful by
+            // construction (widening is information-theoretically uncomputable from
+            // the narrow residue; see algebraic-fpsan.md). Use a deterministic,
+            // in-range convention -- Inf/NaN map across, a finite residue reduces
+            // mod the destination modulus (identity for same width).
+            using ToBits = typename To::bits_type;
+            return To::from_fpsan_payload(static_cast<ToBits>(
+                detail::alg_cast1(Value<FromFT, S, C>::alg_cfg(), To::alg_cfg(), v.fpsan_payload())));
+        }
         else
         {
             using FromBits = typename Value<FromFT, S, C>::bits_type;

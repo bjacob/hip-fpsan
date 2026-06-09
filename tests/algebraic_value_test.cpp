@@ -4,6 +4,7 @@
 // End-to-end test of the algebraic Semantics wired into Value<>.
 //   c++ -std=c++17 -I include tests/algebraic_value_test.cpp -o /tmp/algv && /tmp/algv
 // ----------------------------------------------------------------------------
+#include "fpsan/cast.hpp"
 #include "fpsan/math.hpp"
 #include "fpsan/value.hpp"
 
@@ -101,6 +102,25 @@ int main()
               "alg: matmul is reassociation-invariant (sanitizer property)");
         check(mac<Exp>(A, B, 4, o1) == mac<Exp>(A, B, 4, o2),
               "exp-variant: matmul is reassociation-invariant");
+    }
+
+    // ---- faithful fma: a*b+c exactly (value model) ----
+    check(fma(Alg{2.0f}, Alg{3.0f}, Alg{1.0f}) == Alg{7.0f}, "alg: fma(2,3,1) == 7");
+    check(fma(Alg{1.5f}, Alg{2.0f}, Alg{0.5f}) == Alg{3.5f}, "alg: fma value-faithful");
+
+    // ---- min/max: deterministic, commutative, reassociation-invariant ----
+    check(min(Alg{1.0f}, Alg{2.0f}) == min(Alg{2.0f}, Alg{1.0f}), "alg: min commutes");
+    check(max(min(Alg{3.0f}, Alg{1.0f}), Alg{2.0f})
+              == max(Alg{2.0f}, min(Alg{1.0f}, Alg{3.0f})),
+          "alg: min/max reassoc-invariant");
+
+    // ---- cast: same-width is identity; cross-width is deterministic ----
+    check(cast<float>(Alg{1.25f}) == Alg{1.25f}, "alg: same-width cast is identity");
+    {
+        using H = Value<_Float16, Semantics::FPSanAlgebraic1, Conversions::Explicit>;
+        H h1 = cast<_Float16>(Alg{1.5f});
+        H h2 = cast<_Float16>(Alg{1.5f});
+        check(h1 == h2, "alg: cross-width cast is deterministic");
     }
 
     std::printf("passed %ld, failed %ld\n", pass, fail);

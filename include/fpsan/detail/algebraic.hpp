@@ -377,6 +377,31 @@ namespace fpsan
         {
             return alg_lanewise1(a, [&](u64 x) { return alg_tagged1(c, x, tag); });
         }
+        // Binary tagged token (e.g. fmod): deterministic in both operands.
+        FPSAN_HOST_DEVICE constexpr u64 alg_tagged2_1(const AlgConfig& c, u64 a, u64 b, u64 tag)
+        {
+            if(!alg_is_fin(c, a) || !alg_is_fin(c, b))
+                return c.nan_code;
+            return alg_token(tag, alg_token(tag, a, c.n) + b, c.n);
+        }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_tagged2(const AlgConfig& c, Bits a, Bits b, u64 tag)
+        {
+            return alg_lanewise2(a, b, [&](u64 x, u64 y) { return alg_tagged2_1(c, x, y, tag); });
+        }
+
+        // Cast convention between widths (NON-faithful by construction -- a
+        // per-width modulus makes widening uncomputable; see algebraic-fpsan.md).
+        // Deterministic and in-range: Inf/NaN map across, a finite residue maps
+        // by reduction mod the destination modulus (identity for same width).
+        FPSAN_HOST_DEVICE constexpr u64 alg_cast1(const AlgConfig& from, const AlgConfig& to, u64 p)
+        {
+            if(from.has_inf_nan && p == from.inf_code)
+                return to.inf_code;
+            if(from.has_inf_nan && p == from.nan_code)
+                return to.nan_code;
+            return p % to.n;
+        }
 
     } // namespace detail
 } // namespace fpsan
