@@ -182,7 +182,7 @@ namespace fpsan
         /* of the payload (Triton's min/max contract): deterministic, a.c.i., and  */            \
         /* reassociation-invariant -- though not value-faithful, since a finite    */            \
         /* field has no compatible order. */                                                     \
-        if constexpr(F::is_payload)                                                              \
+        if constexpr(F::is_fpsan)                                                              \
             return FPSAN_FROM_PAYLOAD(                                                           \
                 F, detail::PAYLOAD_FN(F::config, a.fpsan_payload(), b.fpsan_payload()));         \
         else                                                                                     \

@@ -56,8 +56,8 @@ namespace fpsan
 
     namespace detail
     {
-        // Payload-based semantics: the Value object IS an integer payload.
-        FPSAN_HOST_DEVICE constexpr bool is_payload_semantics(Semantics s)
+        // Fpsan (non-native) semantics: the Value object IS an integer payload.
+        FPSAN_HOST_DEVICE constexpr bool is_fpsan_semantics(Semantics s)
         {
             return s != Semantics::Native;
         }
@@ -115,11 +115,11 @@ namespace fpsan
         // (matching native `float_type < float_type`).
         using cmp_t = decltype(std::declval<float_type>() < std::declval<float_type>());
 
-        // In a payload mode (FPSan or any algebraic variant) the object IS the
+        // In an fpsan mode (FPSanLikeTriton or any algebraic variant) the object IS the
         // integer payload; otherwise it is the float.
-        static constexpr bool is_payload   = detail::is_payload_semantics(semantics);
+        static constexpr bool is_fpsan   = detail::is_fpsan_semantics(semantics);
         static constexpr bool is_algebraic = detail::is_algebraic_semantics(semantics);
-        using storage_type = std::conditional_t<is_payload, bits_type, float_type>;
+        using storage_type = std::conditional_t<is_fpsan, bits_type, float_type>;
 
         // Per-lane mixing configuration (function of the element type only).
         static constexpr detail::MixConfig config = detail::make_mix_config<element_type>();
@@ -176,7 +176,7 @@ namespace fpsan
         // ---- named accessors -----------------------------------------------------
         FPSAN_HOST_DEVICE constexpr float_type to_float() const
         {
-            if constexpr(is_payload)
+            if constexpr(is_fpsan)
                 return unembed(storage_);
             else
                 return storage_;
@@ -186,14 +186,14 @@ namespace fpsan
         // (FPSan or any algebraic variant).
         FPSAN_HOST_DEVICE constexpr bits_type fpsan_payload() const
         {
-            static_assert(is_payload,
-                          "fpsan_payload() is only defined in a payload mode (FPSan "
+            static_assert(is_fpsan,
+                          "fpsan_payload() is only defined in an fpsan mode (FPSanLikeTriton "
                           "or an algebraic variant)");
             return storage_;
         }
         FPSAN_HOST_DEVICE static constexpr Value from_fpsan_payload(bits_type p)
         {
-            static_assert(is_payload,
+            static_assert(is_fpsan,
                           "from_fpsan_payload() is only defined in a payload mode "
                           "(FPSan or an algebraic variant)");
             return Value(static_cast<storage_type>(p), raw_tag{});
@@ -205,14 +205,14 @@ namespace fpsan
         // mode.
         FPSAN_HOST_DEVICE constexpr bits_type to_storage_bits() const
         {
-            if constexpr(is_payload)
+            if constexpr(is_fpsan)
                 return storage_;
             else
                 return __builtin_bit_cast(bits_type, storage_);
         }
         FPSAN_HOST_DEVICE static constexpr Value from_storage_bits(bits_type b)
         {
-            if constexpr(is_payload)
+            if constexpr(is_fpsan)
                 return raw(static_cast<storage_type>(b));
             else
                 return raw(__builtin_bit_cast(float_type, b));
@@ -225,7 +225,7 @@ namespace fpsan
         {
             static_assert(is_vector, "get(i) is only defined for vector Values");
             using Scalar = Value<element_type, semantics_, conversions_>;
-            if constexpr(is_payload)
+            if constexpr(is_fpsan)
                 return Scalar::from_fpsan_payload(storage_[i]);
             else
                 return Scalar(storage_[i]);
@@ -234,7 +234,7 @@ namespace fpsan
                                              Value<element_type, semantics_, conversions_> v)
         {
             static_assert(is_vector, "set(i,v) is only defined for vector Values");
-            if constexpr(is_payload)
+            if constexpr(is_fpsan)
                 storage_[i] = v.fpsan_payload();
             else
                 storage_[i] = v.to_float();
@@ -264,7 +264,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr Value operator-() const
         {
-            if constexpr(!is_payload)
+            if constexpr(!is_fpsan)
                 return raw(static_cast<storage_type>(-storage_));
             else if constexpr(is_algebraic)
                 return raw(static_cast<storage_type>(detail::alg_neg(alg_cfg(), storage_)));
@@ -336,7 +336,7 @@ namespace fpsan
         // the float itself otherwise. Shared by both converting constructors.
         FPSAN_HOST_DEVICE static constexpr storage_type from_float(float_type v)
         {
-            if constexpr(is_payload)
+            if constexpr(is_fpsan)
                 return static_cast<storage_type>(embed(v));
             else
                 return static_cast<storage_type>(v);
@@ -367,7 +367,7 @@ namespace fpsan
 
         FPSAN_HOST_DEVICE constexpr Value combine_add(Value o) const
         {
-            if constexpr(!is_payload)
+            if constexpr(!is_fpsan)
                 return raw(static_cast<storage_type>(storage_ + o.storage_));
             else if constexpr(is_algebraic)
                 return raw(
@@ -378,7 +378,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr Value combine_sub(Value o) const
         {
-            if constexpr(!is_payload)
+            if constexpr(!is_fpsan)
                 return raw(static_cast<storage_type>(storage_ - o.storage_));
             else if constexpr(is_algebraic)
                 return raw(
@@ -389,7 +389,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr Value combine_mul(Value o) const
         {
-            if constexpr(!is_payload)
+            if constexpr(!is_fpsan)
                 return raw(static_cast<storage_type>(storage_ * o.storage_));
             else if constexpr(is_algebraic)
                 return raw(
@@ -400,7 +400,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr Value combine_div(Value o) const
         {
-            if constexpr(!is_payload)
+            if constexpr(!is_fpsan)
                 return raw(static_cast<storage_type>(storage_ / o.storage_));
             else if constexpr(is_algebraic)
                 return raw(
@@ -416,7 +416,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr cmp_t less(Value o) const
         {
-            if constexpr(is_payload)
+            if constexpr(is_fpsan)
                 return __builtin_bit_cast(signed_bits_type, storage_)
                        < __builtin_bit_cast(signed_bits_type, o.storage_);
             else

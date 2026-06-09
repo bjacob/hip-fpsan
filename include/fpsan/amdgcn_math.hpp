@@ -71,7 +71,7 @@ namespace fpsan
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rsqh, _Float16, rsqrt, __builtin_amdgcn_rsqh)
 
     // rsq_clamp: clamp variant; we model it as plain rsqrt in FPSan (no
-    // distinct payload semantics in the existing tagged set).
+    // distinct fpsan semantics in the existing tagged set).
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rsq_clampf, float, rsqrt, __builtin_amdgcn_rsq_clampf)
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rsq_clamp, double, rsqrt, __builtin_amdgcn_rsq_clamp)
 

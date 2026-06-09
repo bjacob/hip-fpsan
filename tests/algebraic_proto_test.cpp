@@ -75,7 +75,7 @@ static void test_width(const char* name, AlgVariant field, AlgVariant exp)
     check(alg_add1(cf, cf.nan_code, 5) == cf.nan_code, "NaN absorbs");
 
     // exp homomorphism (Exp variant, >= 8 bits): exp(a+b) = exp(a)*exp(b)
-    check(ce.has_exp, "Exp variant has exp at this width");
+    check(ce.two_moduli, "Exp variant has exp at this width");
     long eh = 0, en = 0;
     u64 seed = 12345;
     for(int k = 0; k < 5000; ++k, ++en)
@@ -89,15 +89,15 @@ static void test_width(const char* name, AlgVariant field, AlgVariant exp)
     check(eh == en, "exp(a+b)=exp(a)*exp(b) (CRT)");
     check(alg_exp1(ce, 0) == 1, "exp(0)=1");
     // Field variant does NOT get the homomorphism (hash token)
-    check(!cf.has_exp, "Field variant has no exp");
+    check(!cf.two_moduli, "Field variant has no exp");
 }
 
 int main()
 {
     // sub-byte fallback: Exp variants behave like Field below 8 bits
-    check(!alg_modulus(AlgVariant::Exp1, 4).has_exp, "Exp1 @4-bit: no exp (fallback)");
-    check(!alg_modulus(AlgVariant::Exp1, 6).has_exp, "Exp1 @6-bit: no exp (fallback)");
-    check(alg_modulus(AlgVariant::Exp1, 8).has_exp, "Exp1 @8-bit: has exp");
+    check(!alg_modulus(AlgVariant::Exp1, 4).two_moduli, "Exp1 @4-bit: no exp (fallback)");
+    check(!alg_modulus(AlgVariant::Exp1, 6).two_moduli, "Exp1 @6-bit: no exp (fallback)");
+    check(alg_modulus(AlgVariant::Exp1, 8).two_moduli, "Exp1 @8-bit: has exp");
     check(alg_modulus(AlgVariant::Exp1, 4).n == alg_modulus(AlgVariant::Field1, 4).n,
           "Exp1 @4-bit reuses Field1's prime");
 

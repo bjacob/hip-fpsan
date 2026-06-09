@@ -21,7 +21,7 @@
 //
 // Per the design: everything keys on the *scalar element* width.  Exp variants
 // only make sense >= 8 bits (sub-byte types are matmul-only), so below 8 bits
-// an Exp variant FALLS BACK to its matching Field prime (has_exp = false).
+// an Exp variant FALLS BACK to its matching Field prime (two_moduli = false).
 // Vector Values apply all of this LANE-WISE; vector width != element width.
 //
 // Casts between widths are NOT value-faithful here (a per-width modulus makes
@@ -58,9 +58,9 @@ namespace fpsan
         struct AlgModulus
         {
             u64  n        = 0; // modulus; residues in [0, n)
-            u64  g        = 0; // exp/log generator (order d); unused if !has_exp
-            u64  d        = 0; // exp/log/trig exponent modulus; unused if !has_exp
-            bool has_exp  = false;
+            u64  g        = 0; // exp/log generator (order d); unused if !two_moduli
+            u64  d        = 0; // exp/log/trig exponent modulus; unused if !two_moduli
+            bool two_moduli  = false;
             // order-d rotation element of (Z/n)[i] (i^2=-1) for sin/cos: a genuine
             // rotation in the F_p factor, identity in the F_d factor. Trig only.
             u64  omega_re = 0;
@@ -152,7 +152,7 @@ namespace fpsan
             u64 d        = 0;
             u64 inf_code = 0; // = n
             u64 nan_code = 0; // = n + 1
-            bool has_exp = false;
+            bool two_moduli = false;
             u64  omega_re = 0; // order-d rotation element of (Z/n)[i], for sin/cos
             u64  omega_im = 0;
             bool has_trig = false;
@@ -177,7 +177,7 @@ namespace fpsan
             c.n           = m.n;
             c.g           = m.g;
             c.d           = m.d;
-            c.has_exp     = m.has_exp;
+            c.two_moduli     = m.two_moduli;
             c.omega_re    = m.omega_re;
             c.omega_im    = m.omega_im;
             c.has_trig    = m.has_trig;
@@ -294,7 +294,7 @@ namespace fpsan
         {
             if(!alg_is_fin(c, a))
                 return c.nan_code; // exp(Inf) ambiguous (unsigned), exp(NaN)=NaN
-            if(c.has_exp)
+            if(c.two_moduli)
                 return alg_powmod(c.g, a % c.d, c.n); // g^(v mod d): the homomorphism
             return alg_token(/*tag "exp"*/ 0x657870ull, a, c.n);
         }
@@ -465,7 +465,7 @@ namespace fpsan
         // a production device path would precompute a d-entry table.
         FPSAN_HOST_DEVICE constexpr u64 alg_log1(const AlgConfig& c, u64 r)
         {
-            if(!c.has_exp)
+            if(!c.two_moduli)
                 return alg_tagged1(c, r, 0x6C6F67ull /*"log"*/);
             if(!alg_is_fin(c, r))
                 return c.nan_code; // log(Inf/NaN)
