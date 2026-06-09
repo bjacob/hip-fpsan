@@ -222,6 +222,43 @@ namespace fpsan
         return fpsan::max(fpsan::min(fpsan::max(a, b), c), fpsan::min(a, b));
     }
 
+    // ---- generic extern fallback: tag any unmodeled call by a symbol name ------
+    // For an op with no honored identity (a new intrinsic, an arbitrary libdevice
+    // symbol) this gives a deterministic, symbol-distinct, argument-order-sensitive
+    // fingerprint -- the only structure an opaque function can carry. The scheme is
+    // bit-for-bit Triton's extern tagging (see detail::payload_extern_tagged), so a
+    // symbol tagged here matches what Triton's sanitizer emits for it. There is no
+    // Float-mode behavior (an opaque symbol has no native implementation), so Float
+    // mode must call the real function -- e.g. the FPSAN_DEFINE_AMDGCN_*_EXTERN
+    // macros do exactly that. Pass detail::stable_string_hash("symbol") as the key.
+    template <class FT, Semantics S, Conversions C, class... Rest>
+    FPSAN_HOST_DEVICE Value<FT, S, C>
+        extern_tagged(detail::u64 name_hash, Value<FT, S, C> first, Rest... rest)
+    {
+        using F = Value<FT, S, C>;
+        static_assert(F::is_fpsan,
+                      "extern_tagged is defined only in a payload mode (an opaque "
+                      "symbol has no native implementation); call the real function "
+                      "in Float mode");
+        static_assert((std::is_same_v<Rest, Value<FT, S, C>> && ...),
+                      "all operands of extern_tagged must be the same Value type");
+        if constexpr(F::is_vector)
+        {
+            F out{};
+            for(unsigned l = 0; l < F::lanes; ++l)
+                out.set(l, extern_tagged(name_hash, first.get(l), rest.get(l)...));
+            return out;
+        }
+        else if constexpr(F::is_algebraic)
+            return FPSAN_FROM_PAYLOAD(
+                F, detail::alg_extern_tagged1(F::alg_cfg(), name_hash, first.fpsan_payload(),
+                                              rest.fpsan_payload()...));
+        else // FPSanLikeTriton
+            return FPSAN_FROM_PAYLOAD(
+                F, detail::payload_extern_tagged(F::config, name_hash, first.fpsan_payload(),
+                                                 rest.fpsan_payload()...));
+    }
+
 #undef FPSAN_FROM_PAYLOAD
 
 } // namespace fpsan

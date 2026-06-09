@@ -55,6 +55,31 @@ namespace fpsan
             return fpsan::FPSAN_OP(a, b, c);                                             \
     }
 
+// Like the above, but for an intrinsic with NO modeled identity (a new/opaque
+// op). Float mode calls the builtin; FPSan/algebraic mode tags it generically by
+// its symbol name via the Triton-parity extern fallback (fpsan::extern_tagged),
+// so adding such an intrinsic needs no bespoke payload semantics -- this one
+// line is the whole integration, and it is independent of the gfx arch.
+#define FPSAN_DEFINE_AMDGCN_UNARY_EXTERN(name, type, BUILTIN)                          \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>  \
+    FPSAN_DEVICE Value<type, S, C> name(Value<type, S, C> v)                           \
+    {                                                                                  \
+        if constexpr(S == Semantics::Native)                                           \
+            return Value<type, S, C>(BUILTIN(v.to_float()));                           \
+        else                                                                           \
+            return fpsan::extern_tagged(fpsan::detail::stable_string_hash(#name), v);  \
+    }
+
+#define FPSAN_DEFINE_AMDGCN_BINARY_EXTERN(name, type, BUILTIN)                           \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>    \
+    FPSAN_DEVICE Value<type, S, C> name(Value<type, S, C> a, Value<type, S, C> b)        \
+    {                                                                                    \
+        if constexpr(S == Semantics::Native)                                             \
+            return Value<type, S, C>(BUILTIN(a.to_float(), b.to_float()));               \
+        else                                                                             \
+            return fpsan::extern_tagged(fpsan::detail::stable_string_hash(#name), a, b); \
+    }
+
     // ---- reciprocal ----
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rcpf, float, rcp, __builtin_amdgcn_rcpf)
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rcp, double, rcp, __builtin_amdgcn_rcp)

@@ -438,6 +438,26 @@ namespace fpsan
             return alg_lanewise2(a, b, [&](u64 x, u64 y) { return alg_tagged2_1(c, x, y, tag); });
         }
 
+        // Generic extern/libdevice fallback in the residue ring: a deterministic,
+        // symbol-distinct, argument-order-sensitive token for any unmodeled call,
+        // keyed by a symbol-name hash. The algebraic analogue of
+        // payload_extern_tagged (which is itself a transcription of Triton's extern
+        // tagging -- see fpsan/detail/math.hpp). NaN-propagating. The arg index is
+        // folded into each token's tag, so f(a,b) != f(b,a).
+        template <class... P>
+        FPSAN_HOST_DEVICE constexpr u64
+            alg_extern_tagged1(const AlgConfig& c, u64 name_hash, P... operands)
+        {
+            bool fin = true;
+            ((fin = fin && alg_is_fin(c, static_cast<u64>(operands))), ...);
+            if(!fin)
+                return c.nan_code;
+            u64      acc = name_hash % c.n;
+            unsigned i   = 0;
+            ((acc = alg_token(acc + i++, static_cast<u64>(operands), c.n)), ...);
+            return acc;
+        }
+
         // Cast convention between widths (NON-faithful by construction -- a
         // per-width modulus makes widening uncomputable; see algebraic-fpsan.md).
         // Deterministic and in-range: Inf/NaN map across, a finite residue maps
