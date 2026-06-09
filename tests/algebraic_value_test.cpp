@@ -91,6 +91,26 @@ int main()
     check(Exp{0.5f}.fpsan_payload() != Exp2{0.5f}.fpsan_payload(),
           "Exp1 and Exp2 use distinct moduli (different residue for 0.5)");
 
+    // ---- log: the Exp variant honors log(x*y) == log(x) + log(y) ----
+    check(log(Exp{1.0f}) == Exp{0.0f}, "log: log(1) == 0");
+    {
+        long  ok = 0, n = 0;
+        float xs[] = {1.0f, 2.0f, 3.0f, 5.0f, 0.5f, 1.5f, 7.0f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                ok += (log(a * b) == log(a) + log(b));
+                ++n;
+            }
+        check(ok == n, "log: log(x*y) == log(x)+log(y) (Exp variant, dlog homomorphism)");
+    }
+    // log inverts exp on the exp-image: exp(log(exp v)) == exp v
+    check(exp(log(exp(Exp{1.5f}))) == exp(Exp{1.5f}), "log: exp(log(exp v)) == exp v");
+    // Field variant: log is a tagged token, not a homomorphism
+    check(log(Alg{2.0f} * Alg{3.0f}) != log(Alg{2.0f}) + log(Alg{3.0f}),
+          "field: log is NOT a homomorphism (tagged token)");
+
     // ---- Inf / NaN reach the payload, via 1/0 ----
     check(((Alg{1.0f} / Alg{0.0f}) / (Alg{1.0f} / Alg{0.0f})) == (Alg{1.0f} / Alg{0.0f}) /
               (Alg{1.0f} / Alg{0.0f}),

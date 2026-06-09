@@ -108,7 +108,6 @@ namespace fpsan
             return F(static_cast<FT>(NATIVE));                                                     \
         }                                                                                          \
     }
-    FPSAN_DEFINE_TAGGED_UNARY(log, Log, std::log(v))
     FPSAN_DEFINE_TAGGED_UNARY(log2, Log2, std::log2(v))
     FPSAN_DEFINE_TAGGED_UNARY(sqrt, Sqrt, std::sqrt(v))
     // precise_sqrt mirrors Triton's IEEE-correct sqrt: a distinct FPSan tag from
@@ -122,6 +121,26 @@ namespace fpsan
     FPSAN_DEFINE_TAGGED_UNARY(fract, Fract, v - std::floor(v))
     FPSAN_DEFINE_TAGGED_UNARY(tanh, Tanh, std::tanh(v))
 #undef FPSAN_DEFINE_TAGGED_UNARY
+
+    // log is special: the Exp variants honor log(x*y)=log(x)+log(y) via the
+    // discrete log on the order-d channel (the dual of exp's g^(v mod d)); FPSan
+    // and the Field variants keep it a tagged token.
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_HOST_DEVICE Value<FT, S, C> log(Value<FT, S, C> x)
+    {
+        using F = Value<FT, S, C>;
+        if constexpr(F::semantics == Semantics::FPSan)
+            return FPSAN_FROM_PAYLOAD(F,
+                                      detail::payload_tagged_unary(
+                                          F::config, x.fpsan_payload(), detail::UnaryOpId::Log));
+        else if constexpr(F::is_algebraic)
+            return FPSAN_FROM_PAYLOAD(F, detail::alg_log(F::alg_cfg(), x.fpsan_payload()));
+        else
+        {
+            const detail::compute_t<FT> v = static_cast<detail::compute_t<FT>>(x.to_float());
+            return F(static_cast<FT>(std::log(v)));
+        }
+    }
 
     // ---- modular binary / ternary: fma, fmod, fmin/fmax, min/max ---------------
     template <class FT, Semantics S, Conversions C>

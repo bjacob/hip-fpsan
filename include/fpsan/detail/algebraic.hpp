@@ -409,6 +409,47 @@ namespace fpsan
             return p % to.n;
         }
 
+        // log: the inverse of exp on the order-d channel, the dual of g^(v mod d).
+        // exp embeds Z/d into the MULTIPLICATIVE order-d subgroup <g>; log embeds
+        // it into the ADDITIVE order-d subgroup {0, n/d, 2n/d, ...} (= multiples
+        // of p, since n=p*d), which is closed under mod-n addition and isomorphic
+        // to Z/d -- so log(x*y) = log(x)+log(y) holds EXACTLY in Z/n. Concretely
+        //   log(r) = (n/d) * dlog_g( (r mod p)^(d+1) )     in [0, n)
+        // where (r mod p)^(d+1) is r's order-d component (the SG projection, since
+        // (p-1)/d = 2) and dlog is its discrete log base g. Only the Exp (CRT)
+        // variants have the d-channel; the Field variants fall back to a tagged
+        // token. Undefined at a true zero (-> Inf pole) and where the value
+        // vanishes in the F_p factor (-> NaN). The brute-force dlog is O(d);
+        // a production device path would precompute a d-entry table.
+        FPSAN_HOST_DEVICE constexpr u64 alg_log1(const AlgConfig& c, u64 r)
+        {
+            if(!c.has_exp)
+                return alg_tagged1(c, r, 0x6C6F67ull /*"log"*/);
+            if(!alg_is_fin(c, r))
+                return c.nan_code; // log(Inf/NaN)
+            if(r == 0)
+                return c.inf_code; // log(0) = -inf (unsigned pole)
+            const u64 p  = c.n / c.d; // prime field factor (n = p*d)
+            const u64 rp = r % p;
+            if(rp == 0)
+                return c.nan_code; // value vanishes in the F_p factor
+            const u64 gp     = c.g % p;                  // order-d generator in F_p^*
+            const u64 target = alg_powmod(rp, c.d + 1, p); // r's order-d component
+            u64       cur    = 1 % p;
+            for(u64 k = 0; k < c.d; ++k)
+            {
+                if(cur == target)
+                    return (p * k) % c.n; // (n/d)*k, in the additive order-d subgroup
+                cur = (cur * gp) % p;
+            }
+            return c.nan_code; // unreachable: target lies in <g>
+        }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_log(const AlgConfig& c, Bits r)
+        {
+            return alg_lanewise1(r, [&](u64 x) { return alg_log1(c, x); });
+        }
+
     } // namespace detail
 } // namespace fpsan
 
