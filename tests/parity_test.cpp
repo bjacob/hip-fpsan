@@ -110,7 +110,7 @@ namespace
             // FPSan mode is integer/constexpr payload algebra: it MUST match
             // bit-for-bit. Float mode is native hardware arithmetic, whose
             // rounding may differ host vs device -- out of scope here.
-            if constexpr(S == Semantics::FPSan)
+            if constexpr(S == Semantics::FPSanLikeTriton)
             {
                 EXPECT_EQ(d.storage_add, h.storage_add) << label << " add @" << i;
                 EXPECT_EQ(d.storage_sub, h.storage_sub) << label << " sub @" << i;
@@ -144,7 +144,7 @@ namespace
         // Host invariant on the shared body: in FPSan mode the payload ring laws
         // are exact and must always hold. Float mode is native arithmetic, so no
         // algebraic-law conformance is asserted.
-        if constexpr(S == Semantics::FPSan)
+        if constexpr(S == Semantics::FPSanLikeTriton)
             for(int i = 0; i < n; ++i)
                 EXPECT_EQ(host[i].laws & fpsan_test::kRingLaws, fpsan_test::kRingLaws)
                     << label << " ring law @" << i;

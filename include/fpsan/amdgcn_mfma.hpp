@@ -703,7 +703,7 @@ namespace fpsan
         const std::uint64_t u       = static_cast<std::uint64_t>(Frag.to_storage_bits()); \
         const int           bit_off = reg * 32 + sub * 8;                                 \
         const std::uint8_t  byte    = static_cast<std::uint8_t>((u >> bit_off) & 0xFFu);  \
-        if constexpr(Sem == Semantics::Float)                                             \
+        if constexpr(Sem == Semantics::Native)                                             \
             return Value<FP8Type, Sem, Conv>(FP8Type(byte));                              \
         else                                                                              \
             return Value<FP8Type, Sem, Conv>::from_fpsan_payload(byte);                   \
@@ -714,7 +714,7 @@ namespace fpsan
     template <int         CBSZ = 0,                                                       \
               int         ABID = 0,                                                       \
               int         BLGP = 0,                                                       \
-              Semantics   S    = Semantics::Float,                                        \
+              Semantics   S    = Semantics::Native,                                        \
               Conversions Cv   = Conversions::Explicit>                                   \
     FPSAN_DEVICE Value<v4f_native, S, Cv> NAME(                                           \
         Value<AVec_, S, Cv> a, Value<AVec_, S, Cv> b, Value<v4f_native, S, Cv> c)         \
@@ -723,7 +723,7 @@ namespace fpsan
         {                                                                                 \
             static_assert(M_ != 32, "use the 32x32x16 wrapper for v16f acc");             \
         }                                                                                 \
-        if constexpr(S == Semantics::Float)                                               \
+        if constexpr(S == Semantics::Native)                                               \
         {                                                                                 \
             auto d = BUILTIN(a.to_float(), b.to_float(), c.to_float(), CBSZ, ABID, BLGP); \
             return Value<v4f_native, S, Cv>(d);                                           \
@@ -739,12 +739,12 @@ namespace fpsan
     template <int         CBSZ = 0,                                                       \
               int         ABID = 0,                                                       \
               int         BLGP = 0,                                                       \
-              Semantics   S    = Semantics::Float,                                        \
+              Semantics   S    = Semantics::Native,                                        \
               Conversions Cv   = Conversions::Explicit>                                   \
     FPSAN_DEVICE Value<v16f_native, S, Cv> NAME(                                          \
         Value<AVec_, S, Cv> a, Value<AVec_, S, Cv> b, Value<v16f_native, S, Cv> c)        \
     {                                                                                     \
-        if constexpr(S == Semantics::Float)                                               \
+        if constexpr(S == Semantics::Native)                                               \
         {                                                                                 \
             auto d = BUILTIN(a.to_float(), b.to_float(), c.to_float(), CBSZ, ABID, BLGP); \
             return Value<v16f_native, S, Cv>(d);                                          \
@@ -804,12 +804,12 @@ namespace fpsan
     template <int         CBSZ = 0,                                                       \
               int         ABID = 0,                                                       \
               int         BLGP = 0,                                                       \
-              Semantics   S    = Semantics::Float,                                        \
+              Semantics   S    = Semantics::Native,                                        \
               Conversions Cv   = Conversions::Explicit>                                   \
     FPSAN_DEVICE Value<CVec_, S, Cv> NAME(                                                \
         Value<AVec_, S, Cv> a, Value<AVec_, S, Cv> b, Value<CVec_, S, Cv> c)              \
     {                                                                                     \
-        if constexpr(S == Semantics::Float)                                               \
+        if constexpr(S == Semantics::Native)                                               \
         {                                                                                 \
             auto d = BUILTIN(a.to_float(), b.to_float(), c.to_float(), CBSZ, ABID, BLGP); \
             return Value<CVec_, S, Cv>(d);                                                \
@@ -919,12 +919,12 @@ namespace fpsan
     template <int         CBSZ = 0,                                                   \
               int         ABID = 0,                                                   \
               int         BLGP = 0,                                                   \
-              Semantics   S    = Semantics::Float,                                    \
+              Semantics   S    = Semantics::Native,                                    \
               Conversions Cv   = Conversions::Explicit>                               \
     FPSAN_DEVICE Value<CFragVec_, S, Cv> NAME(                                        \
         Value<AVec_, S, Cv> a, Value<BVec_, S, Cv> b, Value<CFragVec_, S, Cv> c)      \
     {                                                                                 \
-        if constexpr(S == Semantics::Float)                                           \
+        if constexpr(S == Semantics::Native)                                           \
         {                                                                             \
             const long ai = __builtin_bit_cast(long, a.to_float());                   \
             const long bi = __builtin_bit_cast(long, b.to_float());                   \
@@ -1017,13 +1017,13 @@ namespace fpsan
     template <int         CBSZ = 0,
               int         ABID = 0,
               int         BLGP = 0,
-              Semantics   S    = Semantics::Float,
+              Semantics   S    = Semantics::Native,
               Conversions Cv   = Conversions::Explicit>
     FPSAN_DEVICE Value<v4d_native, S, Cv> amdgcn_mfma_f64_16x16x4f64(Value<double, S, Cv>     a,
                                                                      Value<double, S, Cv>     b,
                                                                      Value<v4d_native, S, Cv> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             auto d = __builtin_amdgcn_mfma_f64_16x16x4f64(
                 a.to_float(), b.to_float(), c.to_float(), CBSZ, ABID, BLGP);
@@ -1046,13 +1046,13 @@ namespace fpsan
     template <int         CBSZ = 0,
               int         ABID = 0,
               int         BLGP = 0,
-              Semantics   S    = Semantics::Float,
+              Semantics   S    = Semantics::Native,
               Conversions Cv   = Conversions::Explicit>
     FPSAN_DEVICE Value<double, S, Cv> amdgcn_mfma_f64_4x4x4f64(Value<double, S, Cv> a,
                                                                Value<double, S, Cv> b,
                                                                Value<double, S, Cv> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             auto d = __builtin_amdgcn_mfma_f64_4x4x4f64(
                 a.to_float(), b.to_float(), c.to_float(), CBSZ, ABID, BLGP);
@@ -1100,12 +1100,12 @@ namespace fpsan
     template <int         CBSZ = 0,                                                       \
               int         ABID = 0,                                                       \
               int         BLGP = 0,                                                       \
-              Semantics   S    = Semantics::Float,                                        \
+              Semantics   S    = Semantics::Native,                                        \
               Conversions Cv   = Conversions::Explicit>                                   \
     FPSAN_DEVICE Value<CVEC_, S, Cv> NAME(                                                \
         Value<float, S, Cv> a, Value<float, S, Cv> b, Value<CVEC_, S, Cv> c)              \
     {                                                                                     \
-        if constexpr(S == Semantics::Float)                                               \
+        if constexpr(S == Semantics::Native)                                               \
         {                                                                                 \
             auto d = BUILTIN(a.to_float(), b.to_float(), c.to_float(), CBSZ, ABID, BLGP); \
             return Value<CVEC_, S, Cv>(d);                                                \
@@ -1179,7 +1179,7 @@ namespace fpsan
               int         BLGP     = 0,
               int         ScaleAOp = 0,
               int         ScaleBOp = 0,
-              Semantics   S        = Semantics::Float,
+              Semantics   S        = Semantics::Native,
               Conversions Cv       = Conversions::Explicit,
               class AFrag          = v32e4m3_native,
               class BFrag          = v32e4m3_native>
@@ -1190,7 +1190,7 @@ namespace fpsan
                                                         int                      scale_a,
                                                         int                      scale_b)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             (void)ABID; // scaled MFMA has no ABID operand; kept only for API symmetry.
             auto d = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
@@ -1224,7 +1224,7 @@ namespace fpsan
               int         BLGP     = 0,
               int         ScaleAOp = 0,
               int         ScaleBOp = 0,
-              Semantics   S        = Semantics::Float,
+              Semantics   S        = Semantics::Native,
               Conversions Cv       = Conversions::Explicit,
               class AFrag          = v32e4m3_native,
               class BFrag          = v32e4m3_native>
@@ -1235,7 +1235,7 @@ namespace fpsan
                                                        int                       scale_a,
                                                        int                       scale_b)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             (void)ABID; // scaled MFMA has no ABID operand; kept only for API symmetry.
             auto d = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
@@ -1288,7 +1288,7 @@ namespace fpsan
               int         BLGP,
               int         ScaleAOp = 0,
               int         ScaleBOp = 0,
-              Semantics   S        = Semantics::Float,
+              Semantics   S        = Semantics::Native,
               Conversions Cv       = Conversions::Explicit>
     FPSAN_DEVICE Value<v4f_native, S, Cv> amdgcn_mfma_scale_f32_16x16x128_f8f6f4_sub(
         v8i32_native a, v8i32_native b, Value<v4f_native, S, Cv> c, int scale_a, int scale_b)
@@ -1297,7 +1297,7 @@ namespace fpsan
                       "the _sub wrapper is for fp6/bf6/fp4 (CBSZ/BLGP 2-4); use the "
                       "Value<v32_fragment> wrapper for fp8/bf8 (0,1), or the "
                       "*_f8f6f4_mixed wrapper to mix an 8-bit and a sub-byte operand.");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             auto d = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
                 a, b, c.to_float(), CBSZ, BLGP, ScaleAOp, scale_a, ScaleBOp, scale_b);
@@ -1326,7 +1326,7 @@ namespace fpsan
               int         BLGP,
               int         ScaleAOp = 0,
               int         ScaleBOp = 0,
-              Semantics   S        = Semantics::Float,
+              Semantics   S        = Semantics::Native,
               Conversions Cv       = Conversions::Explicit>
     FPSAN_DEVICE Value<v16f_native, S, Cv> amdgcn_mfma_scale_f32_32x32x64_f8f6f4_sub(
         v8i32_native a, v8i32_native b, Value<v16f_native, S, Cv> c, int scale_a, int scale_b)
@@ -1335,7 +1335,7 @@ namespace fpsan
                       "the _sub wrapper is for fp6/bf6/fp4 (CBSZ/BLGP 2-4); use the "
                       "Value<v32_fragment> wrapper for fp8/bf8 (0,1), or the "
                       "*_f8f6f4_mixed wrapper to mix an 8-bit and a sub-byte operand.");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             auto d = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 a, b, c.to_float(), CBSZ, BLGP, ScaleAOp, scale_a, ScaleBOp, scale_b);
@@ -1372,7 +1372,7 @@ namespace fpsan
               int         BLGP,
               int         ScaleAOp = 0,
               int         ScaleBOp = 0,
-              Semantics   S        = Semantics::Float,
+              Semantics   S        = Semantics::Native,
               Conversions Cv       = Conversions::Explicit,
               class AFrag          = v32e4m3_native>
     FPSAN_DEVICE Value<v4f_native, S, Cv> amdgcn_mfma_scale_f32_16x16x128_f8f6f4_mixed_a8(
@@ -1382,7 +1382,7 @@ namespace fpsan
         static_assert(BLGP >= 2,
                       "mixed_a8: B must be sub-byte fp6/bf6/fp4 (BLGP 2-4); for 8-bit "
                       "x 8-bit use the plain f8f6f4 wrapper.");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             auto d = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
                 __builtin_bit_cast(v8i32_native, a.to_float()),
@@ -1414,7 +1414,7 @@ namespace fpsan
               int         BLGP,
               int         ScaleAOp = 0,
               int         ScaleBOp = 0,
-              Semantics   S        = Semantics::Float,
+              Semantics   S        = Semantics::Native,
               Conversions Cv       = Conversions::Explicit,
               class BFrag          = v32e4m3_native>
     FPSAN_DEVICE Value<v4f_native, S, Cv> amdgcn_mfma_scale_f32_16x16x128_f8f6f4_mixed_b8(
@@ -1424,7 +1424,7 @@ namespace fpsan
         static_assert(CBSZ >= 2,
                       "mixed_b8: A must be sub-byte fp6/bf6/fp4 (CBSZ 2-4); for 8-bit "
                       "x 8-bit use the plain f8f6f4 wrapper.");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             auto d = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
                 a,
@@ -1459,7 +1459,7 @@ namespace fpsan
               int         BLGP,
               int         ScaleAOp = 0,
               int         ScaleBOp = 0,
-              Semantics   S        = Semantics::Float,
+              Semantics   S        = Semantics::Native,
               Conversions Cv       = Conversions::Explicit,
               class AFrag          = v32e4m3_native>
     FPSAN_DEVICE Value<v16f_native, S, Cv>
@@ -1473,7 +1473,7 @@ namespace fpsan
         static_assert(BLGP >= 2,
                       "mixed_a8: B must be sub-byte fp6/bf6/fp4 (BLGP 2-4); for 8-bit "
                       "x 8-bit use the plain f8f6f4 wrapper.");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             auto d = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 __builtin_bit_cast(v8i32_native, a.to_float()),
@@ -1505,7 +1505,7 @@ namespace fpsan
               int         BLGP,
               int         ScaleAOp = 0,
               int         ScaleBOp = 0,
-              Semantics   S        = Semantics::Float,
+              Semantics   S        = Semantics::Native,
               Conversions Cv       = Conversions::Explicit,
               class BFrag          = v32e4m3_native>
     FPSAN_DEVICE Value<v16f_native, S, Cv>
@@ -1519,7 +1519,7 @@ namespace fpsan
         static_assert(CBSZ >= 2,
                       "mixed_b8: A must be sub-byte fp6/bf6/fp4 (CBSZ 2-4); for 8-bit "
                       "x 8-bit use the plain f8f6f4 wrapper.");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             auto d = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 a,

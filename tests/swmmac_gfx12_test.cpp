@@ -89,11 +89,11 @@ __global__ void k_swmmac_f16_pair(const std::uint16_t* a_in,
         raw_out[lane * 8 + s] = raw[s];
 
     // --- via fpsan wrapper (Float mode) ---
-    Value<fpsan::v8h_native, Semantics::Float, kCC>          av{a};
-    Value<fpsan::v16h_swmmac_native, Semantics::Float, kCC>  bv{b};
-    Value<fpsan::v8f_native, Semantics::Float, kCC>          cv{c};
+    Value<fpsan::v8h_native, Semantics::Native, kCC>          av{a};
+    Value<fpsan::v16h_swmmac_native, Semantics::Native, kCC>  bv{b};
+    Value<fpsan::v8f_native, Semantics::Native, kCC>          cv{c};
     auto                                                     dv
-        = fpsan::amdgcn_swmmac_f32_16x16x32_f16_w32<Semantics::Float, kCC>(av, bv, cv, idx);
+        = fpsan::amdgcn_swmmac_f32_16x16x32_f16_w32<Semantics::Native, kCC>(av, bv, cv, idx);
     fpsan::v8f_native d = static_cast<fpsan::v8f_native>(dv);
     for(int s = 0; s < 8; ++s)
         wrap_out[lane * 8 + s] = d[s];
@@ -136,11 +136,11 @@ __global__ void k_swmmac_bf16_pair(const std::uint16_t* a_in,
 #endif
     for(int s = 0; s < 8; ++s)
         raw_out[lane * 8 + s] = raw[s];
-    Value<fpsan::v8bf_native, Semantics::Float, kCC>          av{a};
-    Value<fpsan::v16bf_swmmac_native, Semantics::Float, kCC>  bv{b};
-    Value<fpsan::v8f_native, Semantics::Float, kCC>           cv{c};
+    Value<fpsan::v8bf_native, Semantics::Native, kCC>          av{a};
+    Value<fpsan::v16bf_swmmac_native, Semantics::Native, kCC>  bv{b};
+    Value<fpsan::v8f_native, Semantics::Native, kCC>           cv{c};
     auto                                                      dv
-        = fpsan::amdgcn_swmmac_f32_16x16x32_bf16_w32<Semantics::Float, kCC>(av, bv, cv, idx);
+        = fpsan::amdgcn_swmmac_f32_16x16x32_bf16_w32<Semantics::Native, kCC>(av, bv, cv, idx);
     fpsan::v8f_native d = static_cast<fpsan::v8f_native>(dv);
     for(int s = 0; s < 8; ++s)
         wrap_out[lane * 8 + s] = d[s];
@@ -181,9 +181,9 @@ __global__ void k_swmmac_f16h_pair(const std::uint16_t* a_in,
     };
     for(int s = 0; s < 8; ++s)
         raw_out[lane * 8 + s] = store_h(raw[s]);
-    Value<fpsan::v8h_native, Semantics::Float, kCC>         av{a}, cv{c};
-    Value<fpsan::v16h_swmmac_native, Semantics::Float, kCC> bv{b};
-    auto dv = fpsan::amdgcn_swmmac_f16_16x16x32_f16_w32<Semantics::Float, kCC>(av, bv, cv, idx);
+    Value<fpsan::v8h_native, Semantics::Native, kCC>         av{a}, cv{c};
+    Value<fpsan::v16h_swmmac_native, Semantics::Native, kCC> bv{b};
+    auto dv = fpsan::amdgcn_swmmac_f16_16x16x32_f16_w32<Semantics::Native, kCC>(av, bv, cv, idx);
     fpsan::v8h_native d = static_cast<fpsan::v8h_native>(dv);
     for(int s = 0; s < 8; ++s)
         wrap_out[lane * 8 + s] = store_h(d[s]);
@@ -229,46 +229,46 @@ __global__ void k_swmmac_fp8_pair(const std::uint8_t* a_in,
     for(int s = 0; s < 8; ++s)
         raw_out[lane * 8 + s] = raw[s];
 
-    Value<fpsan::v8f_native, Semantics::Float, kCC> cv{c};
+    Value<fpsan::v8f_native, Semantics::Native, kCC> cv{c};
     fpsan::v8f_native d{};
     if constexpr(VARIANT == 0)
     {
-        Value<fpsan::v8e4m3_native, Semantics::Float, kCC>         av{
+        Value<fpsan::v8e4m3_native, Semantics::Native, kCC>         av{
             __builtin_bit_cast(fpsan::v8e4m3_native, a)};
-        Value<fpsan::v16e4m3_swmmac_native, Semantics::Float, kCC> bv{
+        Value<fpsan::v16e4m3_swmmac_native, Semantics::Native, kCC> bv{
             __builtin_bit_cast(fpsan::v16e4m3_swmmac_native, b)};
         d = static_cast<fpsan::v8f_native>(
-            fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<Semantics::Float, kCC>(
+            fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<Semantics::Native, kCC>(
                 av, bv, cv, idx));
     }
     else if constexpr(VARIANT == 1)
     {
-        Value<fpsan::v8e4m3_native, Semantics::Float, kCC>         av{
+        Value<fpsan::v8e4m3_native, Semantics::Native, kCC>         av{
             __builtin_bit_cast(fpsan::v8e4m3_native, a)};
-        Value<fpsan::v16e5m2_swmmac_native, Semantics::Float, kCC> bv{
+        Value<fpsan::v16e5m2_swmmac_native, Semantics::Native, kCC> bv{
             __builtin_bit_cast(fpsan::v16e5m2_swmmac_native, b)};
         d = static_cast<fpsan::v8f_native>(
-            fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<Semantics::Float, kCC>(
+            fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<Semantics::Native, kCC>(
                 av, bv, cv, idx));
     }
     else if constexpr(VARIANT == 2)
     {
-        Value<fpsan::v8e5m2_native, Semantics::Float, kCC>         av{
+        Value<fpsan::v8e5m2_native, Semantics::Native, kCC>         av{
             __builtin_bit_cast(fpsan::v8e5m2_native, a)};
-        Value<fpsan::v16e4m3_swmmac_native, Semantics::Float, kCC> bv{
+        Value<fpsan::v16e4m3_swmmac_native, Semantics::Native, kCC> bv{
             __builtin_bit_cast(fpsan::v16e4m3_swmmac_native, b)};
         d = static_cast<fpsan::v8f_native>(
-            fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<Semantics::Float, kCC>(
+            fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<Semantics::Native, kCC>(
                 av, bv, cv, idx));
     }
     else
     {
-        Value<fpsan::v8e5m2_native, Semantics::Float, kCC>         av{
+        Value<fpsan::v8e5m2_native, Semantics::Native, kCC>         av{
             __builtin_bit_cast(fpsan::v8e5m2_native, a)};
-        Value<fpsan::v16e5m2_swmmac_native, Semantics::Float, kCC> bv{
+        Value<fpsan::v16e5m2_swmmac_native, Semantics::Native, kCC> bv{
             __builtin_bit_cast(fpsan::v16e5m2_swmmac_native, b)};
         d = static_cast<fpsan::v8f_native>(
-            fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<Semantics::Float, kCC>(
+            fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<Semantics::Native, kCC>(
                 av, bv, cv, idx));
     }
     for(int s = 0; s < 8; ++s)
@@ -690,7 +690,7 @@ __device__ inline void swmmac_h_dataflow(const float*         Adense,
     for(int reg = 0; reg < 8; ++reg)
     {
         const int m = reg + 8 * side;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[m * kSwN + j] = static_cast<Out>(dv.get(reg).to_float());
         else
             D[m * kSwN + j] = static_cast<Out>(dv.get(reg).fpsan_payload());
@@ -724,9 +724,9 @@ std::vector<CScalar> sw_reference_h(const SwData& d)
 template <class AScalar, class BScalar, class CScalar>
 std::vector<std::uint64_t> sw_reference_fpsan_h(const SwData& d)
 {
-    using VA = Value<AScalar, Semantics::FPSan, kCC>;
-    using VB = Value<BScalar, Semantics::FPSan, kCC>;
-    using VC = Value<CScalar, Semantics::FPSan, kCC>;
+    using VA = Value<AScalar, Semantics::FPSanLikeTriton, kCC>;
+    using VB = Value<BScalar, Semantics::FPSanLikeTriton, kCC>;
+    using VC = Value<CScalar, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint64_t> ref(kSwM * kSwN);
     for(int m = 0; m < kSwM; ++m)
         for(int n = 0; n < kSwN; ++n)
@@ -758,9 +758,9 @@ __global__ void k_swmmac_f16_float(const float*         A,
                                    float*               D)
 {
     auto fn = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_f16_w32<Semantics::Float, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_f16_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
-    swmmac_h_dataflow<Semantics::Float, _Float16, _Float16, float, float>(
+    swmmac_h_dataflow<Semantics::Native, _Float16, _Float16, float, float>(
         A, B, C, p0, p1, idx, D, fn);
 }
 __global__ void k_swmmac_f16_fpsan(const float*         A,
@@ -772,9 +772,9 @@ __global__ void k_swmmac_f16_fpsan(const float*         A,
                                    std::uint32_t*       D)
 {
     auto fn = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_f16_w32<Semantics::FPSan, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_f16_w32<Semantics::FPSanLikeTriton, kCC>(av, bv, cv, i);
     };
-    swmmac_h_dataflow<Semantics::FPSan, _Float16, _Float16, float, std::uint32_t>(
+    swmmac_h_dataflow<Semantics::FPSanLikeTriton, _Float16, _Float16, float, std::uint32_t>(
         A, B, C, p0, p1, idx, D, fn);
 }
 
@@ -841,9 +841,9 @@ __global__ void k_swmmac_bf16_float(const float*         A,
                                     float*               D)
 {
     auto fn = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_bf16_w32<Semantics::Float, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_bf16_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
-    swmmac_h_dataflow<Semantics::Float, __bf16, __bf16, float, float>(A, B, C, p0, p1, idx, D, fn);
+    swmmac_h_dataflow<Semantics::Native, __bf16, __bf16, float, float>(A, B, C, p0, p1, idx, D, fn);
 }
 __global__ void k_swmmac_bf16_fpsan(const float*         A,
                                     const float*         B,
@@ -854,9 +854,9 @@ __global__ void k_swmmac_bf16_fpsan(const float*         A,
                                     std::uint32_t*       D)
 {
     auto fn = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_bf16_w32<Semantics::FPSan, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_bf16_w32<Semantics::FPSanLikeTriton, kCC>(av, bv, cv, i);
     };
-    swmmac_h_dataflow<Semantics::FPSan, __bf16, __bf16, float, std::uint32_t>(
+    swmmac_h_dataflow<Semantics::FPSanLikeTriton, __bf16, __bf16, float, std::uint32_t>(
         A, B, C, p0, p1, idx, D, fn);
 }
 
@@ -923,9 +923,9 @@ __global__ void k_swmmac_f16h_float(const float*         A,
                                     _Float16*            D)
 {
     auto fn = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f16_16x16x32_f16_w32<Semantics::Float, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f16_16x16x32_f16_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
-    swmmac_h_dataflow<Semantics::Float, _Float16, _Float16, _Float16, _Float16>(
+    swmmac_h_dataflow<Semantics::Native, _Float16, _Float16, _Float16, _Float16>(
         A, B, C, p0, p1, idx, D, fn);
 }
 __global__ void k_swmmac_f16h_fpsan(const float*         A,
@@ -937,9 +937,9 @@ __global__ void k_swmmac_f16h_fpsan(const float*         A,
                                     std::uint16_t*       D)
 {
     auto fn = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f16_16x16x32_f16_w32<Semantics::FPSan, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f16_16x16x32_f16_w32<Semantics::FPSanLikeTriton, kCC>(av, bv, cv, i);
     };
-    swmmac_h_dataflow<Semantics::FPSan, _Float16, _Float16, _Float16, std::uint16_t>(
+    swmmac_h_dataflow<Semantics::FPSanLikeTriton, _Float16, _Float16, _Float16, std::uint16_t>(
         A, B, C, p0, p1, idx, D, fn);
 }
 
@@ -1057,7 +1057,7 @@ __global__ void k_swmmac_fp8_kernel(const float*         Adense,
     for(int reg = 0; reg < 8; ++reg)
     {
         const int m = reg + 8 * side;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[m * kSwN + j] = static_cast<Out>(dv.get(reg).to_float());
         else
             D[m * kSwN + j] = static_cast<Out>(dv.get(reg).fpsan_payload());
@@ -1091,9 +1091,9 @@ std::vector<float> sw_reference_fp8(const SwData& d)
 template <class AScalar, class BScalar>
 std::vector<std::uint32_t> sw_reference_fp8_fpsan(const SwData& d)
 {
-    using VA = Value<AScalar, Semantics::FPSan, kCC>;
-    using VB = Value<BScalar, Semantics::FPSan, kCC>;
-    using VF = Value<float, Semantics::FPSan, kCC>;
+    using VA = Value<AScalar, Semantics::FPSanLikeTriton, kCC>;
+    using VB = Value<BScalar, Semantics::FPSanLikeTriton, kCC>;
+    using VF = Value<float, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint32_t> ref(kSwM * kSwN);
     for(int m = 0; m < kSwM; ++m)
         for(int n = 0; n < kSwN; ++n)
@@ -1128,7 +1128,7 @@ void run_fp8_layout_and_fpsan(std::uint32_t seed, WrapFloatFn wf, WrapFpsanFn wp
     std::uint16_t*     dI  = to_dev(d.idx);
     float*             dDf = nullptr;
     HIP_CHECK(hipMalloc(&dDf, kSwM * kSwN * sizeof(float)));
-    k_swmmac_fp8_kernel<Semantics::Float, AScalar, BScalar, float>
+    k_swmmac_fp8_kernel<Semantics::Native, AScalar, BScalar, float>
         <<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dDf, wf);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(kSwM * kSwN);
@@ -1140,7 +1140,7 @@ void run_fp8_layout_and_fpsan(std::uint32_t seed, WrapFloatFn wf, WrapFpsanFn wp
     std::vector<std::uint32_t> ref_p = sw_reference_fp8_fpsan<AScalar, BScalar>(d);
     std::uint32_t*             dDp   = nullptr;
     HIP_CHECK(hipMalloc(&dDp, kSwM * kSwN * sizeof(std::uint32_t)));
-    k_swmmac_fp8_kernel<Semantics::FPSan, AScalar, BScalar, std::uint32_t>
+    k_swmmac_fp8_kernel<Semantics::FPSanLikeTriton, AScalar, BScalar, std::uint32_t>
         <<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dDp, wp);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got_p(kSwM * kSwN);
@@ -1161,40 +1161,40 @@ void run_fp8_layout_and_fpsan(std::uint32_t seed, WrapFloatFn wf, WrapFpsanFn wp
 TEST(SwmmacGfx12, F32_FP8_FP8_LayoutAndFpsan)
 {
     auto wf = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<Semantics::Float, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
     auto wp = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<Semantics::FPSan, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<Semantics::FPSanLikeTriton, kCC>(av, bv, cv, i);
     };
     run_fp8_layout_and_fpsan<fpsan::fp8_e4m3, fpsan::fp8_e4m3>(0x400, wf, wp);
 }
 TEST(SwmmacGfx12, F32_FP8_BF8_LayoutAndFpsan)
 {
     auto wf = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<Semantics::Float, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
     auto wp = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<Semantics::FPSan, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<Semantics::FPSanLikeTriton, kCC>(av, bv, cv, i);
     };
     run_fp8_layout_and_fpsan<fpsan::fp8_e4m3, fpsan::fp8_e5m2>(0x500, wf, wp);
 }
 TEST(SwmmacGfx12, F32_BF8_FP8_LayoutAndFpsan)
 {
     auto wf = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<Semantics::Float, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
     auto wp = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<Semantics::FPSan, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<Semantics::FPSanLikeTriton, kCC>(av, bv, cv, i);
     };
     run_fp8_layout_and_fpsan<fpsan::fp8_e5m2, fpsan::fp8_e4m3>(0x600, wf, wp);
 }
 TEST(SwmmacGfx12, F32_BF8_BF8_LayoutAndFpsan)
 {
     auto wf = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<Semantics::Float, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
     auto wp = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<Semantics::FPSan, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<Semantics::FPSanLikeTriton, kCC>(av, bv, cv, i);
     };
     run_fp8_layout_and_fpsan<fpsan::fp8_e5m2, fpsan::fp8_e5m2>(0x700, wf, wp);
 }

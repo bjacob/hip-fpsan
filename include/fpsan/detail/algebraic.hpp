@@ -4,7 +4,7 @@
 // fpsan/detail/algebraic.hpp
 // ----------------------------------------------------------------------------
 // The payload algebra for the *algebraic* FPSan semantics (see the study in
-// bjacob/fpsan: algebraic-fpsan.md).  Where Semantics::FPSan scrambles the
+// bjacob/fpsan: algebraic-fpsan.md).  Where Semantics::FPSanLikeTriton scrambles the
 // float bits into the free ring Z/2^w (mix.hpp's ring_*), the algebraic
 // semantics carry the genuine residue
 //

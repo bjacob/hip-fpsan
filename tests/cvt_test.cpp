@@ -27,8 +27,8 @@ static constexpr Conversions kCC = Conversions::Explicit;
 __global__ void k_cvt_pkrtz_float(const float* a, const float* b, std::uint32_t* out)
 {
     int                                 i = threadIdx.x;
-    Value<float, Semantics::Float, kCC> av{a[i]}, bv{b[i]};
-    auto                                r = fpsan::amdgcn_cvt_pkrtz<Semantics::Float, kCC>(av, bv);
+    Value<float, Semantics::Native, kCC> av{a[i]}, bv{b[i]};
+    auto                                r = fpsan::amdgcn_cvt_pkrtz<Semantics::Native, kCC>(av, bv);
     auto                                vec = static_cast<fpsan::v2h_native>(r);
     out[i]                                  = __builtin_bit_cast(std::uint32_t, vec);
 }
@@ -36,8 +36,8 @@ __global__ void k_cvt_pkrtz_float(const float* a, const float* b, std::uint32_t*
 __global__ void k_cvt_pkrtz_fpsan(const float* a, const float* b, std::uint32_t* out)
 {
     int                                 i = threadIdx.x;
-    Value<float, Semantics::FPSan, kCC> av{a[i]}, bv{b[i]};
-    auto                                r = fpsan::amdgcn_cvt_pkrtz<Semantics::FPSan, kCC>(av, bv);
+    Value<float, Semantics::FPSanLikeTriton, kCC> av{a[i]}, bv{b[i]};
+    auto                                r = fpsan::amdgcn_cvt_pkrtz<Semantics::FPSanLikeTriton, kCC>(av, bv);
     auto                                pay = r.fpsan_payload(); // v2u16
     out[i]                                  = __builtin_bit_cast(std::uint32_t, pay);
 }
@@ -109,8 +109,8 @@ TEST(Cvt, PkrtzFpsanMatchesPerLaneCast)
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(32);
     HIP_CHECK(hipMemcpy(got.data(), dOut, 32 * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    using F = Value<float, Semantics::FPSan, kCC>;
-    using H = Value<_Float16, Semantics::FPSan, kCC>;
+    using F = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using H = Value<_Float16, Semantics::FPSanLikeTriton, kCC>;
     for(int i = 0; i < 32; ++i)
     {
         H             ah       = fpsan::cast<_Float16>(F{a[i]});
@@ -173,13 +173,13 @@ __global__ void k_cvt_f32_fp8_pair(const int*     packed,
     int i     = threadIdx.x;
     direct[i] = __builtin_amdgcn_cvt_f32_fp8(packed[i], Idx);
     wrapper[i]
-        = static_cast<float>(fpsan::amdgcn_cvt_f32_fp8<Idx, Semantics::Float, kCC>(packed[i]));
+        = static_cast<float>(fpsan::amdgcn_cvt_f32_fp8<Idx, Semantics::Native, kCC>(packed[i]));
     const std::uint32_t u    = static_cast<std::uint32_t>(packed[i]);
     const std::uint8_t  byte = static_cast<std::uint8_t>((u >> (Idx * 8)) & 0xFFu);
-    auto                v = Value<fpsan::fp8_e4m3, Semantics::FPSan, kCC>::from_fpsan_payload(byte);
+    auto                v = Value<fpsan::fp8_e4m3, Semantics::FPSanLikeTriton, kCC>::from_fpsan_payload(byte);
     pay_direct[i]         = fpsan::cast<float>(v).fpsan_payload();
     pay_wrapper[i]
-        = fpsan::amdgcn_cvt_f32_fp8<Idx, Semantics::FPSan, kCC>(packed[i]).fpsan_payload();
+        = fpsan::amdgcn_cvt_f32_fp8<Idx, Semantics::FPSanLikeTriton, kCC>(packed[i]).fpsan_payload();
 }
 
 template <int Idx>
@@ -192,13 +192,13 @@ __global__ void k_cvt_f32_bf8_pair(const int*     packed,
     int i     = threadIdx.x;
     direct[i] = __builtin_amdgcn_cvt_f32_bf8(packed[i], Idx);
     wrapper[i]
-        = static_cast<float>(fpsan::amdgcn_cvt_f32_bf8<Idx, Semantics::Float, kCC>(packed[i]));
+        = static_cast<float>(fpsan::amdgcn_cvt_f32_bf8<Idx, Semantics::Native, kCC>(packed[i]));
     const std::uint32_t u    = static_cast<std::uint32_t>(packed[i]);
     const std::uint8_t  byte = static_cast<std::uint8_t>((u >> (Idx * 8)) & 0xFFu);
-    auto                v = Value<fpsan::fp8_e5m2, Semantics::FPSan, kCC>::from_fpsan_payload(byte);
+    auto                v = Value<fpsan::fp8_e5m2, Semantics::FPSanLikeTriton, kCC>::from_fpsan_payload(byte);
     pay_direct[i]         = fpsan::cast<float>(v).fpsan_payload();
     pay_wrapper[i]
-        = fpsan::amdgcn_cvt_f32_bf8<Idx, Semantics::FPSan, kCC>(packed[i]).fpsan_payload();
+        = fpsan::amdgcn_cvt_f32_bf8<Idx, Semantics::FPSanLikeTriton, kCC>(packed[i]).fpsan_payload();
 }
 
 #define CVT_F32_FP8_TEST(FAMILY, IDX)                                                             \
@@ -259,8 +259,8 @@ __global__ void
     // Builtin word-select is false=low, true=high; the wrapper's DstLo=true means
     // LOW, so the equivalent direct call passes !DstLo.
     direct[i] = __builtin_amdgcn_cvt_pk_fp8_f32(a[i], b[i], old[i], !DstLo);
-    Value<float, Semantics::Float, kCC> av{a[i]}, bv{b[i]};
-    wrapper[i] = fpsan::amdgcn_cvt_pk_fp8_f32<DstLo, Semantics::Float, kCC>(av, bv, old[i]);
+    Value<float, Semantics::Native, kCC> av{a[i]}, bv{b[i]};
+    wrapper[i] = fpsan::amdgcn_cvt_pk_fp8_f32<DstLo, Semantics::Native, kCC>(av, bv, old[i]);
 }
 
 template <bool DstLo>
@@ -270,8 +270,8 @@ __global__ void
     int i = threadIdx.x;
     // See cvt_pk_fp8_f32 above: wrapper DstLo=true -> low, builtin true -> high.
     direct[i] = __builtin_amdgcn_cvt_pk_bf8_f32(a[i], b[i], old[i], !DstLo);
-    Value<float, Semantics::Float, kCC> av{a[i]}, bv{b[i]};
-    wrapper[i] = fpsan::amdgcn_cvt_pk_bf8_f32<DstLo, Semantics::Float, kCC>(av, bv, old[i]);
+    Value<float, Semantics::Native, kCC> av{a[i]}, bv{b[i]};
+    wrapper[i] = fpsan::amdgcn_cvt_pk_bf8_f32<DstLo, Semantics::Native, kCC>(av, bv, old[i]);
 }
 
 template <bool DstLo>
@@ -279,7 +279,7 @@ __global__ void k_cvt_pk_fp8_fpsan(
     const float* a, const float* b, const int* old, int* got_expected, int* got_wrapper)
 {
     int                                 i = threadIdx.x;
-    Value<float, Semantics::FPSan, kCC> av{a[i]}, bv{b[i]};
+    Value<float, Semantics::FPSanLikeTriton, kCC> av{a[i]}, bv{b[i]};
     auto                                afp8 = fpsan::cast<fpsan::fp8_e4m3>(av);
     auto                                bfp8 = fpsan::cast<fpsan::fp8_e4m3>(bv);
     std::uint8_t                        ab   = static_cast<std::uint8_t>(afp8.fpsan_payload());
@@ -292,7 +292,7 @@ __global__ void k_cvt_pk_fp8_fpsan(
         u = (u & 0x0000FFFFu) | (static_cast<std::uint32_t>(ab) << 16)
             | (static_cast<std::uint32_t>(bb) << 24);
     got_expected[i] = static_cast<int>(u);
-    got_wrapper[i]  = fpsan::amdgcn_cvt_pk_fp8_f32<DstLo, Semantics::FPSan, kCC>(av, bv, old[i]);
+    got_wrapper[i]  = fpsan::amdgcn_cvt_pk_fp8_f32<DstLo, Semantics::FPSanLikeTriton, kCC>(av, bv, old[i]);
 }
 
 template <bool DstLo>
@@ -300,7 +300,7 @@ __global__ void k_cvt_pk_bf8_fpsan(
     const float* a, const float* b, const int* old, int* got_expected, int* got_wrapper)
 {
     int                                 i = threadIdx.x;
-    Value<float, Semantics::FPSan, kCC> av{a[i]}, bv{b[i]};
+    Value<float, Semantics::FPSanLikeTriton, kCC> av{a[i]}, bv{b[i]};
     auto                                afp8 = fpsan::cast<fpsan::fp8_e5m2>(av);
     auto                                bfp8 = fpsan::cast<fpsan::fp8_e5m2>(bv);
     std::uint8_t                        ab   = static_cast<std::uint8_t>(afp8.fpsan_payload());
@@ -313,7 +313,7 @@ __global__ void k_cvt_pk_bf8_fpsan(
         u = (u & 0x0000FFFFu) | (static_cast<std::uint32_t>(ab) << 16)
             | (static_cast<std::uint32_t>(bb) << 24);
     got_expected[i] = static_cast<int>(u);
-    got_wrapper[i]  = fpsan::amdgcn_cvt_pk_bf8_f32<DstLo, Semantics::FPSan, kCC>(av, bv, old[i]);
+    got_wrapper[i]  = fpsan::amdgcn_cvt_pk_bf8_f32<DstLo, Semantics::FPSanLikeTriton, kCC>(av, bv, old[i]);
 }
 
 #define CVT_PK_FP8_FLOAT_TEST(FAMILY, DSTLO)                                                  \

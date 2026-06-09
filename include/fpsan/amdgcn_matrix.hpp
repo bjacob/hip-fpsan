@@ -16,9 +16,9 @@
 //
 // with a, b, c, d being Value fragments (vector Values) instead of raw vectors.
 //
-//   Semantics::Float : bit-cast to the native vectors and call the real builtin
+//   Semantics::Native : bit-cast to the native vectors and call the real builtin
 //                      (true hardware MMA -- fast and bit-faithful).
-//   Semantics::FPSan : a wave-cooperative software MMA computing D = A*B + C in
+//   Semantics::FPSanLikeTriton : a wave-cooperative software MMA computing D = A*B + C in
 //                      the payload ring, using the hardware fragment layout so
 //                      results match an FPSan scalar/Triton reference.
 //
@@ -251,8 +251,8 @@ namespace fpsan
         // fragment layout is fixed; the accumulator type is whatever C and D carry
         // (== AVec/BVec for the f16/bf16 'same-type' variants, == f32 for the f32-out
         // variants). Generic over Value Semantics: real-float arithmetic at
-        // Semantics::Float is used as an oracle vs the real builtin in tests, and at
-        // Semantics::FPSan the same arithmetic happens in the payload ring.
+        // Semantics::Native is used as an oracle vs the real builtin in tests, and at
+        // Semantics::FPSanLikeTriton the same arithmetic happens in the payload ring.
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
             wmma_16x16x16_dataflow(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
@@ -302,7 +302,7 @@ namespace fpsan
     FPSAN_DEVICE Value<CVec_, S, C> NAME(                                 \
         Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<CVec_, S, C> c) \
     {                                                                     \
-        if constexpr(S == Semantics::Float)                               \
+        if constexpr(S == Semantics::Native)                               \
         {                                                                 \
             CVec_ d = BUILTIN(a.to_float(), b.to_float(), c.to_float());  \
             return Value<CVec_, S, C>(d);                                 \
@@ -320,7 +320,7 @@ namespace fpsan
     FPSAN_DEVICE Value<v8f_native, S, C> NAME(                                     \
         Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<v8f_native, S, C> c)     \
     {                                                                              \
-        if constexpr(S == Semantics::Float)                                        \
+        if constexpr(S == Semantics::Native)                                        \
         {                                                                          \
             v8f_native d = BUILTIN(__builtin_bit_cast(v2i32_native, a.to_float()), \
                                    __builtin_bit_cast(v2i32_native, b.to_float()), \

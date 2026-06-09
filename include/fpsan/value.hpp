@@ -8,8 +8,8 @@
 //   float_type   underlying real type: a supported scalar (float, double,
 //                _Float16, __bf16) OR a Clang/GCC vector of one of those, e.g.
 //                `float __attribute__((ext_vector_type(8)))`.
-//   semantics    Semantics::Float : native arithmetic of float_type (drop-in)
-//                Semantics::FPSan : Triton-style FPSan integer-payload
+//   semantics    Semantics::Native : native arithmetic of float_type (drop-in)
+//                Semantics::FPSanLikeTriton : Triton-style FPSan integer-payload
 //                arithmetic
 //   conversions  Conversions::Implicit / Conversions::Explicit
 //
@@ -34,20 +34,24 @@ namespace fpsan
 
     enum class Semantics
     {
-        Float, // the native float; no sanitization
-        FPSan, // Triton-style scrambling payload in the free ring Z/2^w
+        Native,          // the native float; no sanitization
+        FPSanLikeTriton, // Triton-style scrambling payload in the free ring Z/2^w
         // Algebraic variants: the payload is the residue phi_n(value) in Z/nZ
         // (see detail/algebraic.hpp). Field* are prime moduli (a field; no exp);
-        // Exponentials* are CRT moduli carrying exp(a+b)=exp(a)exp(b).
+        // Exponentials* are CRT moduli carrying exp(a+b)=exp(a)exp(b) (and log);
+        // Trigonometry* (p=4d+1) add sin/cos.
         FPSanAlgebraic1,
         FPSanAlgebraic2,
         FPSanAlgebraicExponentials1,
         FPSanAlgebraicExponentials2,
-        // CRT variants on p = 4d+1 primes: exp + log AND sin/cos (order-d
-        // rotation), at a ~sqrt(2)-smaller d (more collisions) -- opt-in for
-        // trig-heavy code.
         FPSanAlgebraicTrigonometry1,
-        FPSanAlgebraicTrigonometry2
+        FPSanAlgebraicTrigonometry2,
+
+        // Deprecated former spellings, kept as value-preserving aliases so old
+        // code still compiles (with a warning). Prefer the names above.
+        Float [[deprecated("Semantics::Float was renamed to Semantics::Native")]] = Native,
+        FPSan [[deprecated("Semantics::FPSan was renamed to Semantics::FPSanLikeTriton")]]
+            = FPSanLikeTriton,
     };
 
     namespace detail
@@ -55,7 +59,7 @@ namespace fpsan
         // Payload-based semantics: the Value object IS an integer payload.
         FPSAN_HOST_DEVICE constexpr bool is_payload_semantics(Semantics s)
         {
-            return s != Semantics::Float;
+            return s != Semantics::Native;
         }
         FPSAN_HOST_DEVICE constexpr bool is_algebraic_semantics(Semantics s)
         {

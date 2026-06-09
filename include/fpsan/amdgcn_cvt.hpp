@@ -50,11 +50,11 @@ namespace fpsan
     // the builtin; FPSan mode uses two scalar fpsan::cast<_Float16>(...) and
     // assembles them into the v2h fragment (cast does signed-truncate of the
     // payload 32->16, which is the FPSan model of an f32 -> f16 conversion).
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<v2h_native, S, C> amdgcn_cvt_pkrtz(Value<float, S, C> a,
                                                           Value<float, S, C> b)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             // The builtin returns ExtVector<2, __fp16>; bit_cast to our _Float16
             // vector (same storage, different Clang type spelling).
@@ -92,7 +92,7 @@ namespace fpsan
         {
             const std::uint32_t u    = static_cast<std::uint32_t>(packed);
             const std::uint8_t  byte = static_cast<std::uint8_t>((u >> (Idx * 8)) & 0xFFu);
-            if constexpr(S == Semantics::Float)
+            if constexpr(S == Semantics::Native)
                 return Value<FP8, S, C>(FP8(byte));
             else
                 return Value<FP8, S, C>::from_fpsan_payload(byte);
@@ -121,10 +121,10 @@ namespace fpsan
 // reinterprets the byte as an fp8 payload and uses fpsan::cast<float> (which
 // is signed-extend 8 -> 32).
 #define FPSAN_DEFINE_CVT_F32_FP8(name, FP8, BUILTIN)                                              \
-    template <int ByteIdx, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    template <int ByteIdx, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
     FPSAN_DEVICE Value<float, S, C> name(int packed)                                              \
     {                                                                                             \
-        if constexpr(S == Semantics::Float)                                                       \
+        if constexpr(S == Semantics::Native)                                                       \
             return Value<float, S, C>(BUILTIN(packed, ByteIdx));                                  \
         else                                                                                      \
             return fpsan::cast<float>(detail::unpack_byte_to_fp8<ByteIdx, FP8, S, C>(packed));    \
@@ -139,10 +139,10 @@ namespace fpsan
 // the bytes we don't touch. FPSan mode uses fpsan::cast<FP8> (which truncates
 // the f32 payload 32 -> 8) and packs the resulting bytes.
 #define FPSAN_DEFINE_CVT_PK_FP8(name, FP8, BUILTIN)                                              \
-    template <bool DstLo, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    template <bool DstLo, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
     FPSAN_DEVICE int name(Value<float, S, C> a, Value<float, S, C> b, int old)                   \
     {                                                                                            \
-        if constexpr(S == Semantics::Float)                                                      \
+        if constexpr(S == Semantics::Native)                                                      \
             /* Builtin word-select is false=low, true=high (verified on gfx950);     \
          DstLo=true must write the LOW half, matching the FPSan path below, so \
          pass !DstLo. (Without this, Float and FPSan place the byte in         \
@@ -166,10 +166,10 @@ namespace fpsan
 // it to two f32. FPSan mode reinterprets each byte as an fp8 payload and uses
 // fpsan::cast<float>.
 #define FPSAN_DEFINE_CVT_PK_F32_FP8(name, FP8, BUILTIN)                                            \
-    template <bool WordSel, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    template <bool WordSel, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
     FPSAN_DEVICE Value<v2f_native, S, C> name(int packed)                                          \
     {                                                                                              \
-        if constexpr(S == Semantics::Float)                                                        \
+        if constexpr(S == Semantics::Native)                                                        \
         {                                                                                          \
             v2f_native r = BUILTIN(packed, WordSel);                                               \
             return Value<v2f_native, S, C>(r);                                                     \
@@ -221,10 +221,10 @@ namespace fpsan
     } // namespace detail
 
 #define FPSAN_DEFINE_CVT_SR_FP8(NAME, FP8, BUILTIN)                                                \
-    template <int ByteIdx, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>  \
+    template <int ByteIdx, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>  \
     FPSAN_DEVICE int NAME(Value<float, S, C> val, int packed_old, std::uint32_t seed)              \
     {                                                                                              \
-        if constexpr(S == Semantics::Float)                                                        \
+        if constexpr(S == Semantics::Native)                                                        \
             return BUILTIN(val.to_float(), packed_old, static_cast<int>(seed), ByteIdx);           \
         else                                                                                       \
         {                                                                                          \
@@ -246,12 +246,12 @@ namespace fpsan
 // ('f32-to-f16bf16-cvt-sr-insts').  Same FPSan story: seed is opaque, the
 // payload-domain answer is the deterministic Triton-style cast.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_sr_f16_f32)
-    template <bool DstLo, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <bool DstLo, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<v2h_native, S, C> amdgcn_cvt_sr_f16_f32(Value<v2h_native, S, C> old,
                                                                Value<float, S, C>      val,
                                                                std::uint32_t           seed)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v2h_native r = __builtin_amdgcn_cvt_sr_f16_f32(
                 old.to_float(), val.to_float(), seed, DstLo ? false : true);
@@ -267,12 +267,12 @@ namespace fpsan
         }
     }
 
-    template <bool DstLo, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <bool DstLo, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<v2bf_native, S, C> amdgcn_cvt_sr_bf16_f32(Value<v2bf_native, S, C> old,
                                                                  Value<float, S, C>       val,
                                                                  std::uint32_t            seed)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v2bf_native r = __builtin_amdgcn_cvt_sr_bf16_f32(
                 old.to_float(), val.to_float(), seed, DstLo ? false : true);
@@ -319,11 +319,11 @@ namespace fpsan
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_f32_fp8)
     // Scaled scalar unpack: byte ByteIdx of `packed`, treated as fp8 e4m3,
     // converted to f32 with a 2^scale multiplier.
-    template <int ByteIdx, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <int ByteIdx, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<float, S, C> amdgcn_cvt_scalef32_f32_fp8(int                packed,
                                                                 Value<float, S, C> scale)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             return Value<float, S, C>(
                 __builtin_amdgcn_cvt_scalef32_f32_fp8(packed, scale.to_float(), ByteIdx));
         else
@@ -333,11 +333,11 @@ namespace fpsan
         }
     }
 
-    template <int ByteIdx, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <int ByteIdx, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<float, S, C> amdgcn_cvt_scalef32_f32_bf8(int                packed,
                                                                 Value<float, S, C> scale)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             return Value<float, S, C>(
                 __builtin_amdgcn_cvt_scalef32_f32_bf8(packed, scale.to_float(), ByteIdx));
         else
@@ -360,12 +360,12 @@ namespace fpsan
 #define FPSAN_DEFINE_CVT_SCALEF32_F16_FP8(NAME, FP8, BUILTIN)                                \
     template <int         ByteIdx,                                                           \
               bool        Hi,                                                                \
-              Semantics   S = Semantics::Float,                                              \
+              Semantics   S = Semantics::Native,                                              \
               Conversions C = Conversions::Explicit>                                         \
     FPSAN_DEVICE Value<v2h_native, S, C> NAME(                                               \
         Value<v2h_native, S, C> old, int src, Value<float, S, C> scale)                      \
     {                                                                                        \
-        if constexpr(S == Semantics::Float)                                                  \
+        if constexpr(S == Semantics::Native)                                                  \
         {                                                                                    \
             v2h_native r = BUILTIN(old.to_float(), src, scale.to_float(), ByteIdx, Hi);      \
             return Value<v2h_native, S, C>(r);                                               \
@@ -390,13 +390,13 @@ namespace fpsan
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_pk_fp8_f32)
     // Scaled packed pack: two f32s and a scale, spliced into the lo or hi half
     // of a packed int (cvt_pk_fp8_f32's scaled cousin).
-    template <bool DstLo, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <bool DstLo, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE int amdgcn_cvt_scalef32_pk_fp8_f32(Value<float, S, C> a,
                                                     Value<float, S, C> b,
                                                     Value<float, S, C> scale,
                                                     int                old)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             // Builtin takes/returns _Vector<2,short>; bit-identical to our int. The
             // word-select arg is false=low, true=high (silicon-verified), so write the
@@ -422,13 +422,13 @@ namespace fpsan
         }
     }
 
-    template <bool DstLo, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <bool DstLo, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE int amdgcn_cvt_scalef32_pk_bf8_f32(Value<float, S, C> a,
                                                     Value<float, S, C> b,
                                                     Value<float, S, C> scale,
                                                     int                old)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             const auto oldv = __builtin_bit_cast(v2s16_native, old);
             const auto r    = __builtin_amdgcn_cvt_scalef32_pk_bf8_f32(
@@ -455,10 +455,10 @@ namespace fpsan
 // mirroring the non-scaled cvt_pk_f32_{fp8,bf8} but with the 2^scale multiply.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_pk_f32_fp8)
 #define FPSAN_DEFINE_CVT_SCALEF32_UNPACK_FP8(NAME, FP8, DstFT, VEC, BUILTIN)                       \
-    template <bool WordSel, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    template <bool WordSel, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
     FPSAN_DEVICE Value<VEC, S, C> NAME(int packed, Value<float, S, C> scale)                       \
     {                                                                                              \
-        if constexpr(S == Semantics::Float)                                                        \
+        if constexpr(S == Semantics::Native)                                                        \
         {                                                                                          \
             return Value<VEC, S, C>(BUILTIN(packed, scale.to_float(), WordSel));                   \
         }                                                                                          \
@@ -509,10 +509,10 @@ namespace fpsan
 // bf16}. Same divide-by-scale PACK direction as the f32 scalar pack; the
 // builtin's old/result are _Vector<2,short>, bit-identical to our int.
 #define FPSAN_DEFINE_CVT_SCALEF32_PACK_FP8(NAME, FP8, SrcVEC, BUILTIN)                           \
-    template <bool DstLo, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    template <bool DstLo, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
     FPSAN_DEVICE int NAME(int old, Value<SrcVEC, S, C> v, Value<float, S, C> scale)              \
     {                                                                                            \
-        if constexpr(S == Semantics::Float)                                                      \
+        if constexpr(S == Semantics::Native)                                                      \
         {                                                                                        \
             const auto oldv = __builtin_bit_cast(v2s16_native, old);                             \
             const auto r    = BUILTIN(oldv, v.to_float(), scale.to_float(), !DstLo);             \
@@ -559,11 +559,11 @@ namespace fpsan
 // the same byte the scaled non-SR pack would write -- cast<FP8>(val/scale).
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_fp8_f32)
 #define FPSAN_DEFINE_CVT_SCALEF32_SR_FP8(NAME, FP8, SRC, BUILTIN)                                  \
-    template <int ByteIdx, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>  \
+    template <int ByteIdx, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>  \
     FPSAN_DEVICE int NAME(                                                                         \
         int old, Value<SRC, S, C> val, std::uint32_t seed, Value<float, S, C> scale)               \
     {                                                                                              \
-        if constexpr(S == Semantics::Float)                                                        \
+        if constexpr(S == Semantics::Native)                                                        \
             return BUILTIN(old, val.to_float(), seed, scale.to_float(), ByteIdx);                  \
         else                                                                                       \
         {                                                                                          \
@@ -649,10 +649,10 @@ namespace fpsan
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_pk_f32_fp4)
 // ---- Unpack: fp4 nibble pair `Sel` of `packed` -> 2 dst values * scale. -----
 #define FPSAN_DEFINE_CVT_SCALEF32_UNPACK_FP4(NAME, DstFT, VEC, BUILTIN)                       \
-    template <int Sel, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    template <int Sel, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
     FPSAN_DEVICE Value<VEC, S, C> NAME(std::uint32_t packed, Value<float, S, C> scale)        \
     {                                                                                         \
-        if constexpr(S == Semantics::Float)                                                   \
+        if constexpr(S == Semantics::Native)                                                   \
         {                                                                                     \
             VEC r = BUILTIN(packed, scale.to_float(), Sel);                                   \
             return Value<VEC, S, C>(r);                                                       \
@@ -682,13 +682,13 @@ namespace fpsan
 #undef FPSAN_DEFINE_CVT_SCALEF32_UNPACK_FP4
 
     // ---- Pack: 2 f32 -> fp4 nibble pair `Sel` of `old`, each value / scale. -----
-    template <int Sel, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <int Sel, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE std::uint32_t amdgcn_cvt_scalef32_pk_fp4_f32(std::uint32_t      old,
                                                               Value<float, S, C> a,
                                                               Value<float, S, C> b,
                                                               Value<float, S, C> scale)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             return __builtin_amdgcn_cvt_scalef32_pk_fp4_f32(
                 old, a.to_float(), b.to_float(), scale.to_float(), Sel);
         else
@@ -699,11 +699,11 @@ namespace fpsan
 
 // f16/bf16 pack: widen the v2 input to f32, divide by scale, narrow to fp4.
 #define FPSAN_DEFINE_CVT_SCALEF32_PACK_FP4(NAME, SrcFT, VEC, BUILTIN)                         \
-    template <int Sel, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    template <int Sel, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
     FPSAN_DEVICE std::uint32_t NAME(                                                          \
         std::uint32_t old, Value<VEC, S, C> v, Value<float, S, C> scale)                      \
     {                                                                                         \
-        if constexpr(S == Semantics::Float)                                                   \
+        if constexpr(S == Semantics::Native)                                                   \
         {                                                                                     \
             return BUILTIN(old, v.to_float(), scale.to_float(), Sel);                         \
         }                                                                                     \
@@ -731,14 +731,14 @@ namespace fpsan
 // the wrapper passes operands in the builtin's order so the Float path is the
 // hardware truth and the FPSan path is the matching deterministic pack.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_pk_fp4_f32)
-    template <int Sel, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <int Sel, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE std::uint32_t amdgcn_cvt_scalef32_sr_pk_fp4_f32(std::uint32_t      old,
                                                                  Value<float, S, C> a,
                                                                  Value<float, S, C> b,
                                                                  std::uint32_t      seed,
                                                                  Value<float, S, C> scale)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v2f_native v{a.to_float(), b.to_float()};
             return __builtin_amdgcn_cvt_scalef32_sr_pk_fp4_f32(old, v, seed, scale.to_float(), Sel);
@@ -759,11 +759,11 @@ namespace fpsan
 // opaque to the deterministic Triton truncate (same as the f32-source SR pack).
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_pk_fp4_f16)
 #define FPSAN_DEFINE_CVT_SCALEF32_SR_PK_FP4(NAME, VEC, BUILTIN)                               \
-    template <int Sel, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    template <int Sel, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
     FPSAN_DEVICE std::uint32_t NAME(                                                          \
         std::uint32_t old, Value<VEC, S, C> v, std::uint32_t seed, Value<float, S, C> scale)  \
     {                                                                                         \
-        if constexpr(S == Semantics::Float)                                                   \
+        if constexpr(S == Semantics::Native)                                                   \
         {                                                                                     \
             return BUILTIN(old, v.to_float(), seed, scale.to_float(), Sel);                   \
         }                                                                                     \
@@ -840,10 +840,10 @@ namespace fpsan
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6)
 // ---- Unpack v6u32 (32 fp6/bf6 codes) -> v32 dst, each * scale (contiguous).
 #define FPSAN_DEFINE_CVT_SCALEF32_UNPACK_PK32(NAME, DstFT, VEC, BUILTIN)                        \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>            \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>            \
     FPSAN_DEVICE Value<VEC, S, C> NAME(v6u32_native packed, Value<float, S, C> scale)           \
     {                                                                                           \
-        if constexpr(S == Semantics::Float)                                                     \
+        if constexpr(S == Semantics::Native)                                                     \
         {                                                                                       \
             VEC r = BUILTIN(packed, scale.to_float());                                          \
             return Value<VEC, S, C>(r);                                                         \
@@ -886,12 +886,12 @@ namespace fpsan
 
 // ---- Pack two v16 f32 groups -> v6u32 (32 fp6/bf6), interleaved, each /scale.
 #define FPSAN_DEFINE_CVT_SCALEF32_2XPK16(NAME, BUILTIN)                                        \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>           \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>           \
     FPSAN_DEVICE v6u32_native NAME(Value<v16f_native_cvt, S, C> lo,                            \
                                    Value<v16f_native_cvt, S, C> hi,                            \
                                    Value<float, S, C>           scale)                         \
     {                                                                                          \
-        if constexpr(S == Semantics::Float)                                                    \
+        if constexpr(S == Semantics::Native)                                                    \
         {                                                                                      \
             return BUILTIN(lo.to_float(), hi.to_float(), scale.to_float());                    \
         }                                                                                      \
@@ -914,10 +914,10 @@ namespace fpsan
 
 // ---- Pack v32 f16/bf16 -> v6u32 (contiguous), each /scale.
 #define FPSAN_DEFINE_CVT_SCALEF32_PK32_PACK(NAME, SrcFT, VEC, BUILTIN)                        \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>          \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>          \
     FPSAN_DEVICE v6u32_native NAME(Value<VEC, S, C> v, Value<float, S, C> scale)              \
     {                                                                                         \
-        if constexpr(S == Semantics::Float)                                                   \
+        if constexpr(S == Semantics::Native)                                                   \
         {                                                                                     \
             return BUILTIN(v.to_float(), scale.to_float());                                   \
         }                                                                                     \
@@ -950,11 +950,11 @@ namespace fpsan
 
 // ---- Stochastic-rounding contiguous pack v32 f32 -> v6u32 (seed opaque).
 #define FPSAN_DEFINE_CVT_SCALEF32_SR_PK32(NAME, BUILTIN)                              \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>  \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>  \
     FPSAN_DEVICE v6u32_native NAME(                                                   \
         Value<v32f_native, S, C> v, std::uint32_t seed, Value<float, S, C> scale)     \
     {                                                                                 \
-        if constexpr(S == Semantics::Float)                                           \
+        if constexpr(S == Semantics::Native)                                           \
         {                                                                             \
             return BUILTIN(v.to_float(), seed, scale.to_float());                     \
         }                                                                             \
@@ -979,11 +979,11 @@ namespace fpsan
 // insert. Silicon-verified contiguous (bit-identical to non-SR pk32) and seed
 // opaque to the deterministic point.
 #define FPSAN_DEFINE_CVT_SCALEF32_SR_PK32_SRC(NAME, VEC, BUILTIN)                             \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>          \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>          \
     FPSAN_DEVICE v6u32_native NAME(                                                           \
         Value<VEC, S, C> v, std::uint32_t seed, Value<float, S, C> scale)                     \
     {                                                                                         \
-        if constexpr(S == Semantics::Float)                                                   \
+        if constexpr(S == Semantics::Native)                                                   \
         {                                                                                     \
             return BUILTIN(v.to_float(), seed, scale.to_float());                             \
         }                                                                                     \

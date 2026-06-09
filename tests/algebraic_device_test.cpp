@@ -39,8 +39,8 @@ __global__ void wmma_kernel(const _Float16* A, const _Float16* B, float* C)
 // Force device codegen for Float, FPSan, and the algebraic variants through the
 // same intrinsic. If the algebraic instantiations compile, orthogonality holds
 // at the actual GPU-codegen level.
-template __global__ void wmma_kernel<Semantics::Float>(const _Float16*, const _Float16*, float*);
-template __global__ void wmma_kernel<Semantics::FPSan>(const _Float16*, const _Float16*, float*);
+template __global__ void wmma_kernel<Semantics::Native>(const _Float16*, const _Float16*, float*);
+template __global__ void wmma_kernel<Semantics::FPSanLikeTriton>(const _Float16*, const _Float16*, float*);
 template __global__ void
     wmma_kernel<Semantics::FPSanAlgebraic1>(const _Float16*, const _Float16*, float*);
 template __global__ void

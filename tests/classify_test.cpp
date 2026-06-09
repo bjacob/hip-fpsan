@@ -28,10 +28,10 @@ static constexpr Conversions kCC = Conversions::Explicit;
 __global__ void k_classf_pair(const float* in, char* bf, char* bp)
 {
     int                                 i = threadIdx.x;
-    Value<float, Semantics::Float, kCC> vf{in[i]};
-    Value<float, Semantics::FPSan, kCC> vp{in[i]};
-    bf[i] = fpsan::amdgcn_classf<Semantics::Float, kCC>(vf, 0x3FF) ? 1 : 0;
-    bp[i] = fpsan::amdgcn_classf<Semantics::FPSan, kCC>(vp, 0x3FF) ? 1 : 0;
+    Value<float, Semantics::Native, kCC> vf{in[i]};
+    Value<float, Semantics::FPSanLikeTriton, kCC> vp{in[i]};
+    bf[i] = fpsan::amdgcn_classf<Semantics::Native, kCC>(vf, 0x3FF) ? 1 : 0;
+    bp[i] = fpsan::amdgcn_classf<Semantics::FPSanLikeTriton, kCC>(vp, 0x3FF) ? 1 : 0;
 }
 
 TEST(Classify, ClassfFloatAndFpsanAgree)
@@ -71,13 +71,13 @@ TEST(Classify, ClassfFloatAndFpsanAgree)
 __global__ void k_fcmpf_pair(const float* a, const float* b, std::uint64_t* mf, std::uint64_t* mp)
 {
     int                                 i = threadIdx.x;
-    Value<float, Semantics::Float, kCC> af{a[i]}, bf{b[i]};
-    Value<float, Semantics::FPSan, kCC> ap{a[i]}, bp{b[i]};
+    Value<float, Semantics::Native, kCC> af{a[i]}, bf{b[i]};
+    Value<float, Semantics::FPSanLikeTriton, kCC> ap{a[i]}, bp{b[i]};
     // Predicate 1 = OEQ (ordered equal); see LLVM fcmp predicates.
     if(i == 0)
     {
-        *mf = fpsan::amdgcn_fcmpf<1, Semantics::Float, kCC>(af, bf);
-        *mp = fpsan::amdgcn_fcmpf<1, Semantics::FPSan, kCC>(ap, bp);
+        *mf = fpsan::amdgcn_fcmpf<1, Semantics::Native, kCC>(af, bf);
+        *mp = fpsan::amdgcn_fcmpf<1, Semantics::FPSanLikeTriton, kCC>(ap, bp);
     }
 }
 

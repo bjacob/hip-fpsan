@@ -125,11 +125,11 @@ __global__ void k_builtin(const typename Harness<Traits>::AElem* A,
 {
     using H                                             = Harness<Traits>;
     int                                            lane = threadIdx.x;
-    Value<typename H::AVec, Semantics::Float, kCC> a;
-    Value<typename H::BVec, Semantics::Float, kCC> b;
-    Value<typename H::CVec, Semantics::Float, kCC> c;
-    load_frags<Traits, Semantics::Float>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::Float, kCC>(a, b, c);
+    Value<typename H::AVec, Semantics::Native, kCC> a;
+    Value<typename H::BVec, Semantics::Native, kCC> b;
+    Value<typename H::CVec, Semantics::Native, kCC> c;
+    load_frags<Traits, Semantics::Native>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<Semantics::Native, kCC>(a, b, c);
     for(int i = 0; i < H::M; ++i)
         for(int j = 0; j < H::N; ++j)
         {
@@ -148,11 +148,11 @@ __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
 {
     using H                                             = Harness<Traits>;
     int                                            lane = threadIdx.x;
-    Value<typename H::AVec, Semantics::FPSan, kCC> a;
-    Value<typename H::BVec, Semantics::FPSan, kCC> b;
-    Value<typename H::CVec, Semantics::FPSan, kCC> c;
-    load_frags<Traits, Semantics::FPSan>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::FPSan, kCC>(a, b, c);
+    Value<typename H::AVec, Semantics::FPSanLikeTriton, kCC> a;
+    Value<typename H::BVec, Semantics::FPSanLikeTriton, kCC> b;
+    Value<typename H::CVec, Semantics::FPSanLikeTriton, kCC> c;
+    load_frags<Traits, Semantics::FPSanLikeTriton>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<Semantics::FPSanLikeTriton, kCC>(a, b, c);
     for(int i = 0; i < H::M; ++i)
         for(int j = 0; j < H::N; ++j)
         {
@@ -248,9 +248,9 @@ void run_fpsan_matches_scalar_reference()
         GTEST_SKIP() << "no HIP device";
     Mats<Traits> m = make_inputs<Traits>();
 
-    using VA = Value<AE, Semantics::FPSan, kCC>;
-    using VB = Value<BE, Semantics::FPSan, kCC>;
-    using VC = Value<CE, Semantics::FPSan, kCC>;
+    using VA = Value<AE, Semantics::FPSanLikeTriton, kCC>;
+    using VB = Value<BE, Semantics::FPSanLikeTriton, kCC>;
+    using VC = Value<CE, Semantics::FPSanLikeTriton, kCC>;
     std::vector<CBits> ref(H::M * H::N);
     for(int i = 0; i < H::M; ++i)
         for(int j = 0; j < H::N; ++j)
@@ -514,7 +514,7 @@ __global__ void k_mfma_f64_16x16x4(const double* A, const double* B, const doubl
             auto loc = fpsan::detail::output_loc_64(F64_M, F64_N, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * F64_N + j] = d.get(loc.reg / 2).to_float();
                 else
                     D[i * F64_N + j] = d.get(loc.reg / 2).fpsan_payload();
@@ -562,7 +562,7 @@ TEST(MfmaF64_16x16x4, LayoutMatchesHardware)
         }
     double *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
     HIP_CHECK(hipMalloc(&dD, F64_M * F64_N * sizeof(double)));
-    k_mfma_f64_16x16x4<Semantics::Float, double><<<1, WAVE>>>(dA, dB, dC, dD);
+    k_mfma_f64_16x16x4<Semantics::Native, double><<<1, WAVE>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<double> got(F64_M * F64_N);
     HIP_CHECK(hipMemcpy(got.data(), dD, F64_M * F64_N * sizeof(double), hipMemcpyDeviceToHost));
@@ -581,7 +581,7 @@ TEST(MfmaF64_16x16x4, FpsanMatchesScalarReference)
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
     F64Mats m = make_f64_inputs();
-    using VD  = Value<double, Semantics::FPSan, kCC>;
+    using VD  = Value<double, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint64_t> ref(F64_M * F64_N);
     for(int i = 0; i < F64_M; ++i)
         for(int j = 0; j < F64_N; ++j)
@@ -594,7 +594,7 @@ TEST(MfmaF64_16x16x4, FpsanMatchesScalarReference)
     double *       dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
     std::uint64_t* dD;
     HIP_CHECK(hipMalloc(&dD, F64_M * F64_N * sizeof(std::uint64_t)));
-    k_mfma_f64_16x16x4<Semantics::FPSan, std::uint64_t><<<1, WAVE>>>(dA, dB, dC, dD);
+    k_mfma_f64_16x16x4<Semantics::FPSanLikeTriton, std::uint64_t><<<1, WAVE>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint64_t> got(F64_M * F64_N);
     HIP_CHECK(
@@ -628,7 +628,7 @@ __global__ void k_scale_16x16x128(const fpsan::v32e4m3_native* A,
     Value<fpsan::v32e4m3_native, S, kCC> a{A[0]}, b{B[0]};
     Value<v4f_native, S, kCC>            c{C[0]};
     auto d = fpsan::amdgcn_mfma_scale_f32_16x16x128_f8f6f4<0, 0, 0, 0, 0, S, kCC>(a, b, c, sa, sb);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         D[0] = static_cast<v4f_native>(d);
 }
 
@@ -643,7 +643,7 @@ __global__ void k_scale_32x32x64(const fpsan::v32e4m3_native* A,
     Value<fpsan::v32e4m3_native, S, kCC> a{A[0]}, b{B[0]};
     Value<v16f_native, S, kCC>           c{C[0]};
     auto d = fpsan::amdgcn_mfma_scale_f32_32x32x64_f8f6f4<0, 0, 0, 0, 0, S, kCC>(a, b, c, sa, sb);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         D[0] = static_cast<v16f_native>(d);
 }
 
@@ -661,7 +661,7 @@ TEST(ScaledMfma, F8F6F4_16x16x128_FloatLaunches)
     HIP_CHECK(hipMemset(dA, 0, sizeof(*dA)));
     HIP_CHECK(hipMemset(dB, 0, sizeof(*dB)));
     HIP_CHECK(hipMemset(dC, 0, sizeof(*dC)));
-    k_scale_16x16x128<Semantics::Float><<<1, WAVE>>>(dA, dB, dC, dD, 0x7F, 0x7F);
+    k_scale_16x16x128<Semantics::Native><<<1, WAVE>>>(dA, dB, dC, dD, 0x7F, 0x7F);
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipGetLastError());
     (void)hipFree(dA);
@@ -684,7 +684,7 @@ TEST(ScaledMfma, F8F6F4_32x32x64_FloatLaunches)
     HIP_CHECK(hipMemset(dA, 0, sizeof(*dA)));
     HIP_CHECK(hipMemset(dB, 0, sizeof(*dB)));
     HIP_CHECK(hipMemset(dC, 0, sizeof(*dC)));
-    k_scale_32x32x64<Semantics::Float><<<1, WAVE>>>(dA, dB, dC, dD, 0x7F, 0x7F);
+    k_scale_32x32x64<Semantics::Native><<<1, WAVE>>>(dA, dB, dC, dD, 0x7F, 0x7F);
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipGetLastError());
     (void)hipFree(dA);
@@ -714,7 +714,7 @@ __global__ void k_smfmac_zeroA(const CVec* Cin, CVec* Dout, int idx, Wrap wrap)
     Value<BVec, S, kCC> b{BVec{}}; // B = 0
     Value<CVec, S, kCC> c{Cin[lane]}; // per-lane C fragment, verbatim
     auto                d = wrap(a, b, c, idx);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         Dout[lane] = static_cast<CVec>(d);
 }
 
@@ -761,7 +761,7 @@ void run_smfmac_zeroA()
     HIP_CHECK(hipMalloc(&dC, WAVE * sizeof(CVec)));
     HIP_CHECK(hipMalloc(&dD, WAVE * sizeof(CVec)));
     HIP_CHECK(hipMemcpy(dC, hC.data(), WAVE * sizeof(CVec), hipMemcpyHostToDevice));
-    k_smfmac_zeroA<Semantics::Float, fpsan::v8h_native, fpsan::v16h_native, CVec, 0, 0, Wrap>
+    k_smfmac_zeroA<Semantics::Native, fpsan::v8h_native, fpsan::v16h_native, CVec, 0, 0, Wrap>
         <<<1, WAVE>>>(dC, dD, 0, Wrap{});
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipGetLastError());
@@ -796,7 +796,7 @@ __global__ void k_mfma_f64_4x4x4(const double* A, const double* B, const double*
     int                   lane = threadIdx.x;
     Value<double, S, kCC> a{A[lane]}, b{B[lane]}, c{C[lane]};
     auto                  d = fpsan::amdgcn_mfma_f64_4x4x4f64<0, 0, 0, S, kCC>(a, b, c);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         D[lane] = d.to_float();
     else
         D[lane] = d.fpsan_payload();
@@ -833,7 +833,7 @@ TEST(MfmaF64_4x4x4, LayoutMatchesHardware)
     }
     double *dA = to_dev(A), *dB = to_dev(B), *dC = to_dev(C), *dD;
     HIP_CHECK(hipMalloc(&dD, WAVE * sizeof(double)));
-    k_mfma_f64_4x4x4<Semantics::Float, double><<<1, WAVE>>>(dA, dB, dC, dD);
+    k_mfma_f64_4x4x4<Semantics::Native, double><<<1, WAVE>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<double> got(WAVE);
     HIP_CHECK(hipMemcpy(got.data(), dD, WAVE * sizeof(double), hipMemcpyDeviceToHost));
@@ -851,7 +851,7 @@ TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference)
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
     auto A = make_f64_4x4x4_vec(0), B = make_f64_4x4x4_vec(1), C = make_f64_4x4x4_vec(2);
-    using VD = Value<double, Semantics::FPSan, kCC>;
+    using VD = Value<double, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint64_t> ref(WAVE);
     for(int L = 0; L < WAVE; ++L)
     {
@@ -864,7 +864,7 @@ TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference)
     double *       dA = to_dev(A), *dB = to_dev(B), *dC = to_dev(C);
     std::uint64_t* dD;
     HIP_CHECK(hipMalloc(&dD, WAVE * sizeof(std::uint64_t)));
-    k_mfma_f64_4x4x4<Semantics::FPSan, std::uint64_t><<<1, WAVE>>>(dA, dB, dC, dD);
+    k_mfma_f64_4x4x4<Semantics::FPSanLikeTriton, std::uint64_t><<<1, WAVE>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint64_t> got(WAVE);
     HIP_CHECK(hipMemcpy(got.data(), dD, WAVE * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
@@ -913,9 +913,9 @@ __global__ void k_legf32(const float* A, const float* B, const float* C, float* 
                 if(o.lane == lane)
                     cn[o.reg] = C[(b * T::M + i) * T::N + j];
             }
-    Value<float, Semantics::Float, kCC>            a{an}, b2{bn};
-    Value<typename T::CVec, Semantics::Float, kCC> c{cn};
-    auto d = T::template call<Semantics::Float, kCC>(a, b2, c);
+    Value<float, Semantics::Native, kCC>            a{an}, b2{bn};
+    Value<typename T::CVec, Semantics::Native, kCC> c{cn};
+    auto d = T::template call<Semantics::Native, kCC>(a, b2, c);
     for(int b = 0; b < T::Bk; ++b)
         for(int i = 0; i < T::M; ++i)
             for(int j = 0; j < T::N; ++j)
@@ -957,9 +957,9 @@ __global__ void k_legf32_p(const float* A, const float* B, const float* C, std::
                 if(o.lane == lane)
                     cn[o.reg] = C[(b * T::M + i) * T::N + j];
             }
-    Value<float, Semantics::FPSan, kCC>            a{an}, b2{bn};
-    Value<typename T::CVec, Semantics::FPSan, kCC> c{cn};
-    auto d = T::template call<Semantics::FPSan, kCC>(a, b2, c);
+    Value<float, Semantics::FPSanLikeTriton, kCC>            a{an}, b2{bn};
+    Value<typename T::CVec, Semantics::FPSanLikeTriton, kCC> c{cn};
+    auto d = T::template call<Semantics::FPSanLikeTriton, kCC>(a, b2, c);
     for(int b = 0; b < T::Bk; ++b)
         for(int i = 0; i < T::M; ++i)
             for(int j = 0; j < T::N; ++j)
@@ -1035,7 +1035,7 @@ void run_legf32_fpsan()
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
     LegF32Data<T> m = make_legf32<T>();
-    using VF        = Value<float, Semantics::FPSan, kCC>;
+    using VF        = Value<float, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint32_t> ref(T::Bk * T::M * T::N);
     for(int b = 0; b < T::Bk; ++b)
         for(int i = 0; i < T::M; ++i)
@@ -1130,9 +1130,9 @@ __global__ void k_legf16(const float* A, const float* B, const float* C, float* 
                 if(o.lane == lane)
                     cn[o.reg] = C[(b * T::M + i) * T::N + j];
             }
-    Value<typename T::AVec, Semantics::Float, kCC> a{an}, b2{bn};
-    Value<typename T::CVec, Semantics::Float, kCC> c{cn};
-    auto d = T::template call<Semantics::Float, kCC>(a, b2, c);
+    Value<typename T::AVec, Semantics::Native, kCC> a{an}, b2{bn};
+    Value<typename T::CVec, Semantics::Native, kCC> c{cn};
+    auto d = T::template call<Semantics::Native, kCC>(a, b2, c);
     for(int b = 0; b < T::Bk; ++b)
         for(int i = 0; i < T::M; ++i)
             for(int j = 0; j < T::N; ++j)
@@ -1175,9 +1175,9 @@ __global__ void k_legf16_p(const float* A, const float* B, const float* C, std::
                 if(o.lane == lane)
                     cn[o.reg] = C[(b * T::M + i) * T::N + j];
             }
-    Value<typename T::AVec, Semantics::FPSan, kCC> a{an}, b2{bn};
-    Value<typename T::CVec, Semantics::FPSan, kCC> c{cn};
-    auto d = T::template call<Semantics::FPSan, kCC>(a, b2, c);
+    Value<typename T::AVec, Semantics::FPSanLikeTriton, kCC> a{an}, b2{bn};
+    Value<typename T::CVec, Semantics::FPSanLikeTriton, kCC> c{cn};
+    auto d = T::template call<Semantics::FPSanLikeTriton, kCC>(a, b2, c);
     for(int b = 0; b < T::Bk; ++b)
         for(int i = 0; i < T::M; ++i)
             for(int j = 0; j < T::N; ++j)
@@ -1229,7 +1229,7 @@ void run_legf16_fpsan()
         GTEST_SKIP() << "no HIP device";
     LegF32Data<T> m = make_legf32<T>();
     using AE        = typename T::AElem;
-    using VF        = Value<float, Semantics::FPSan, kCC>;
+    using VF        = Value<float, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint32_t> ref(T::Bk * T::M * T::N);
     for(int b = 0; b < T::Bk; ++b)
         for(int i = 0; i < T::M; ++i)
@@ -1238,9 +1238,9 @@ void run_legf16_fpsan()
                 VF acc(m.C[(b * T::M + i) * T::N + j]);
                 for(int k = 0; k < T::K; ++k)
                     acc = acc
-                          + fpsan::cast<float>(Value<AE, Semantics::FPSan, kCC>(
+                          + fpsan::cast<float>(Value<AE, Semantics::FPSanLikeTriton, kCC>(
                                 AE(m.A[(b * T::M + i) * T::K + k])))
-                                * fpsan::cast<float>(Value<AE, Semantics::FPSan, kCC>(
+                                * fpsan::cast<float>(Value<AE, Semantics::FPSanLikeTriton, kCC>(
                                     AE(m.B[(b * T::K + k) * T::N + j])));
                 ref[(b * T::M + i) * T::N + j] = acc.fpsan_payload();
             }
@@ -1418,7 +1418,7 @@ __global__ void k_scale16(const float* A, const float* B, const float* C, Out* D
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * (lane / 16) + reg, j = lane % 16;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * SN + j] = d.get(reg).to_float();
         else
             D[i * SN + j] = d.get(reg).fpsan_payload();
@@ -1470,7 +1470,7 @@ void run_scale16_layout()
         }
     float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
     HIP_CHECK(hipMalloc(&dD, SM * SN * sizeof(float)));
-    k_scale16<Semantics::Float, float, AElem, BElem, CBSZ, BLGP>
+    k_scale16<Semantics::Native, float, AElem, BElem, CBSZ, BLGP>
         <<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(SM * SN);
@@ -1491,9 +1491,9 @@ void run_scale16_fpsan()
         GTEST_SKIP() << "no HIP device";
     ScaleMats m  = make_scale_mats();
     const int sa = 128, sb = 130; // both scales nonzero
-    using VF = Value<float, Semantics::FPSan, kCC>;
-    using VA = Value<AElem, Semantics::FPSan, kCC>;
-    using VB = Value<BElem, Semantics::FPSan, kCC>;
+    using VF = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using VA = Value<AElem, Semantics::FPSanLikeTriton, kCC>;
+    using VB = Value<BElem, Semantics::FPSanLikeTriton, kCC>;
     const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
     std::vector<std::uint32_t> ref(SM * SN);
     for(int i = 0; i < SM; ++i)
@@ -1510,7 +1510,7 @@ void run_scale16_fpsan()
     float *        dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
     std::uint32_t* dD;
     HIP_CHECK(hipMalloc(&dD, SM * SN * sizeof(std::uint32_t)));
-    k_scale16<Semantics::FPSan, std::uint32_t, AElem, BElem, CBSZ, BLGP>
+    k_scale16<Semantics::FPSanLikeTriton, std::uint32_t, AElem, BElem, CBSZ, BLGP>
         <<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(SM * SN);
@@ -1592,7 +1592,7 @@ __global__ void k_scale32(const float* A, const float* B, const float* C, Out* D
             auto loc = fpsan::detail::output_loc_32(S2M, S2N, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * S2N + j] = d.get(loc.reg).to_float();
                 else
                     D[i * S2N + j] = d.get(loc.reg).fpsan_payload();
@@ -1639,7 +1639,7 @@ void run_scale32_layout()
         }
     float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
     HIP_CHECK(hipMalloc(&dD, S2M * S2N * sizeof(float)));
-    k_scale32<Semantics::Float, float, AElem, BElem, CBSZ, BLGP>
+    k_scale32<Semantics::Native, float, AElem, BElem, CBSZ, BLGP>
         <<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(S2M * S2N);
@@ -1660,9 +1660,9 @@ void run_scale32_fpsan()
         GTEST_SKIP() << "no HIP device";
     ScaleMats m  = make_scale_mats32();
     const int sa = 128, sb = 130;
-    using VF = Value<float, Semantics::FPSan, kCC>;
-    using VA = Value<AElem, Semantics::FPSan, kCC>;
-    using VB = Value<BElem, Semantics::FPSan, kCC>;
+    using VF = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using VA = Value<AElem, Semantics::FPSanLikeTriton, kCC>;
+    using VB = Value<BElem, Semantics::FPSanLikeTriton, kCC>;
     const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
     std::vector<std::uint32_t> ref(S2M * S2N);
     for(int i = 0; i < S2M; ++i)
@@ -1678,7 +1678,7 @@ void run_scale32_fpsan()
     float *        dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
     std::uint32_t* dD;
     HIP_CHECK(hipMalloc(&dD, S2M * S2N * sizeof(std::uint32_t)));
-    k_scale32<Semantics::FPSan, std::uint32_t, AElem, BElem, CBSZ, BLGP>
+    k_scale32<Semantics::FPSanLikeTriton, std::uint32_t, AElem, BElem, CBSZ, BLGP>
         <<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(S2M * S2N);
@@ -1799,7 +1799,7 @@ __global__ void k_scale_sub16(const fpsan::v8i32_native* A,
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * (lane / 16) + reg, j = lane % 16;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * SN + j] = d.get(reg).to_float();
         else
             D[i * SN + j] = d.get(reg).fpsan_payload();
@@ -1856,7 +1856,7 @@ void run_scale_sub16_layout()
     HIP_CHECK(hipMemcpy(dA, A.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dB, B.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dC, Cm.data(), SM * SN * sizeof(float), hipMemcpyHostToDevice));
-    k_scale_sub16<Semantics::Float, CBSZ, BLGP, float><<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
+    k_scale_sub16<Semantics::Native, CBSZ, BLGP, float><<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(SM * SN);
     HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(float), hipMemcpyDeviceToHost));
@@ -1877,7 +1877,7 @@ void run_scale_sub16_fpsan()
     const int    wa = sub_width(CBSZ), wb = sub_width(BLGP);
     std::mt19937 rng = fpsan_test::make_rng();
     const int    sa = 128, sb = 130;
-    using VF = Value<float, Semantics::FPSan, kCC>;
+    using VF = Value<float, Semantics::FPSanLikeTriton, kCC>;
     const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
     // Arbitrary Width-bit payloads (the realistic FPSan content of sub-byte data;
     // not necessarily valid format codes -- the dataflow only signed-resizes).
@@ -1928,7 +1928,7 @@ void run_scale_sub16_fpsan()
     HIP_CHECK(hipMemcpy(dA, A.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dB, B.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dC, Cm.data(), SM * SN * sizeof(float), hipMemcpyHostToDevice));
-    k_scale_sub16<Semantics::FPSan, CBSZ, BLGP, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
+    k_scale_sub16<Semantics::FPSanLikeTriton, CBSZ, BLGP, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(SM * SN);
     HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -2000,7 +2000,7 @@ __global__ void k_scale_sub32(const fpsan::v8i32_native* A,
             auto loc = fpsan::detail::output_loc_32(S2M, S2N, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * S2N + j] = d.get(loc.reg).to_float();
                 else
                     D[i * S2N + j] = d.get(loc.reg).fpsan_payload();
@@ -2067,7 +2067,7 @@ void run_scale_sub32_layout()
     HIP_CHECK(hipMemcpy(dA, A.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dB, B.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dC, Cm.data(), S2M * S2N * sizeof(float), hipMemcpyHostToDevice));
-    k_scale_sub32<Semantics::Float, CBSZ, BLGP, float><<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
+    k_scale_sub32<Semantics::Native, CBSZ, BLGP, float><<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(S2M * S2N);
     HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(float), hipMemcpyDeviceToHost));
@@ -2088,7 +2088,7 @@ void run_scale_sub32_fpsan()
     const int    wa = sub_width(CBSZ), wb = sub_width(BLGP);
     std::mt19937 rng = fpsan_test::make_rng();
     const int    sa = 128, sb = 130;
-    using VF = Value<float, Semantics::FPSan, kCC>;
+    using VF = Value<float, Semantics::FPSanLikeTriton, kCC>;
     const VF         vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
     std::vector<int> Ap(S2M * S2K), Bp(S2K * S2N);
     for(auto& x : Ap)
@@ -2126,7 +2126,7 @@ void run_scale_sub32_fpsan()
     HIP_CHECK(hipMemcpy(dA, A.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dB, B.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dC, Cm.data(), S2M * S2N * sizeof(float), hipMemcpyHostToDevice));
-    k_scale_sub32<Semantics::FPSan, CBSZ, BLGP, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
+    k_scale_sub32<Semantics::FPSanLikeTriton, CBSZ, BLGP, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(S2M * S2N);
     HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -2256,7 +2256,7 @@ __global__ void k_scale16_pb(
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * (lane / 16) + reg, j = lane % 16;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * SN + j] = d.get(reg).to_float();
         else
             D[i * SN + j] = d.get(reg).fpsan_payload();
@@ -2302,7 +2302,7 @@ void run_scale16_perblock()
             }
         float* dD;
         HIP_CHECK(hipMalloc(&dD, SM * SN * sizeof(float)));
-        k_scale16_pb<Semantics::Float, float, AElem, BElem, CBSZ, BLGP>
+        k_scale16_pb<Semantics::Native, float, AElem, BElem, CBSZ, BLGP>
             <<<1, WAVE>>>(dA, dB, dC, dD, dSA, dSB);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<float> got(SM * SN);
@@ -2313,9 +2313,9 @@ void run_scale16_perblock()
     }
     // ---- FPSan vs payload-ring reference --------------------------------------
     {
-        using VF = Value<float, Semantics::FPSan, kCC>;
-        using VA = Value<AElem, Semantics::FPSan, kCC>;
-        using VB = Value<BElem, Semantics::FPSan, kCC>;
+        using VF = Value<float, Semantics::FPSanLikeTriton, kCC>;
+        using VA = Value<AElem, Semantics::FPSanLikeTriton, kCC>;
+        using VB = Value<BElem, Semantics::FPSanLikeTriton, kCC>;
         std::vector<std::uint32_t> ref(SM * SN);
         for(int i = 0; i < SM; ++i)
             for(int j = 0; j < SN; ++j)
@@ -2334,7 +2334,7 @@ void run_scale16_perblock()
             }
         std::uint32_t* dD;
         HIP_CHECK(hipMalloc(&dD, SM * SN * sizeof(std::uint32_t)));
-        k_scale16_pb<Semantics::FPSan, std::uint32_t, AElem, BElem, CBSZ, BLGP>
+        k_scale16_pb<Semantics::FPSanLikeTriton, std::uint32_t, AElem, BElem, CBSZ, BLGP>
             <<<1, WAVE>>>(dA, dB, dC, dD, dSA, dSB);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(SM * SN);
@@ -2396,7 +2396,7 @@ __global__ void k_scale32_pb(
             auto loc = fpsan::detail::output_loc_32(S2M, S2N, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * S2N + j] = d.get(loc.reg).to_float();
                 else
                     D[i * S2N + j] = d.get(loc.reg).fpsan_payload();
@@ -2441,7 +2441,7 @@ void run_scale32_perblock()
             }
         float* dD;
         HIP_CHECK(hipMalloc(&dD, S2M * S2N * sizeof(float)));
-        k_scale32_pb<Semantics::Float, float, AElem, BElem, CBSZ, BLGP>
+        k_scale32_pb<Semantics::Native, float, AElem, BElem, CBSZ, BLGP>
             <<<1, WAVE>>>(dA, dB, dC, dD, dSA, dSB);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<float> got(S2M * S2N);
@@ -2451,9 +2451,9 @@ void run_scale32_perblock()
         (void)hipFree(dD);
     }
     {
-        using VF = Value<float, Semantics::FPSan, kCC>;
-        using VA = Value<AElem, Semantics::FPSan, kCC>;
-        using VB = Value<BElem, Semantics::FPSan, kCC>;
+        using VF = Value<float, Semantics::FPSanLikeTriton, kCC>;
+        using VA = Value<AElem, Semantics::FPSanLikeTriton, kCC>;
+        using VB = Value<BElem, Semantics::FPSanLikeTriton, kCC>;
         std::vector<std::uint32_t> ref(S2M * S2N);
         for(int i = 0; i < S2M; ++i)
             for(int j = 0; j < S2N; ++j)
@@ -2472,7 +2472,7 @@ void run_scale32_perblock()
             }
         std::uint32_t* dD;
         HIP_CHECK(hipMalloc(&dD, S2M * S2N * sizeof(std::uint32_t)));
-        k_scale32_pb<Semantics::FPSan, std::uint32_t, AElem, BElem, CBSZ, BLGP>
+        k_scale32_pb<Semantics::FPSanLikeTriton, std::uint32_t, AElem, BElem, CBSZ, BLGP>
             <<<1, WAVE>>>(dA, dB, dC, dD, dSA, dSB);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(S2M * S2N);
@@ -2518,7 +2518,7 @@ __global__ void k_scale_sub16_pb(const fpsan::v8i32_native* A,
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * (lane / 16) + reg, j = lane % 16;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * SN + j] = d.get(reg).to_float();
         else
             D[i * SN + j] = d.get(reg).fpsan_payload();
@@ -2562,7 +2562,7 @@ void run_scale_sub16_perblock_fpsan()
             int lane = 16 * ((k % 64) / 16) + j, s = (k / 64) * 16 + (k % 16);
             set_field(B[lane], wb * s, (unsigned)Bp[k * SN + j], wb);
         }
-    using VF   = Value<float, Semantics::FPSan, kCC>;
+    using VF   = Value<float, Semantics::FPSanLikeTriton, kCC>;
     auto widen = [&](int code, unsigned f) {
         int          w = sub_width(code);
         std::int32_t e = (std::int32_t)(f << (32 - w)) >> (32 - w);
@@ -2596,7 +2596,7 @@ void run_scale_sub16_perblock_fpsan()
     HIP_CHECK(hipMemcpy(dB, B.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dC, Cm.data(), SM * SN * sizeof(float), hipMemcpyHostToDevice));
     int *dSA = to_dev(SA), *dSB = to_dev(SB);
-    k_scale_sub16_pb<Semantics::FPSan, CBSZ, BLGP, std::uint32_t>
+    k_scale_sub16_pb<Semantics::FPSanLikeTriton, CBSZ, BLGP, std::uint32_t>
         <<<1, WAVE>>>(dA, dB, dC, dD, dSA, dSB);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(SM * SN);
@@ -2670,7 +2670,7 @@ __global__ void k_scale16_mix_a8(
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * (lane / 16) + reg, j = lane % 16;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * SN + j] = d.get(reg).to_float();
         else
             D[i * SN + j] = d.get(reg).fpsan_payload();
@@ -2707,7 +2707,7 @@ __global__ void k_scale16_mix_b8(
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * (lane / 16) + reg, j = lane % 16;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * SN + j] = d.get(reg).to_float();
         else
             D[i * SN + j] = d.get(reg).fpsan_payload();
@@ -2786,10 +2786,10 @@ void run_scale16_mixed()
         hipMemcpy(dSub, sub.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMalloc(&dD, SM * SN * sizeof(float)));
     if constexpr(AIsSub)
-        k_scale16_mix_b8<Semantics::Float, float, Fp8Elem, CBSZ, BLGP>
+        k_scale16_mix_b8<Semantics::Native, float, Fp8Elem, CBSZ, BLGP>
             <<<1, WAVE>>>(dSub, dF, dC, dD, sa, sb);
     else
-        k_scale16_mix_a8<Semantics::Float, float, Fp8Elem, CBSZ, BLGP>
+        k_scale16_mix_a8<Semantics::Native, float, Fp8Elem, CBSZ, BLGP>
             <<<1, WAVE>>>(dF, dSub, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(SM * SN);
@@ -2834,8 +2834,8 @@ void run_scale16_mixed_fpsan()
     const int    subfmt = AIsSub ? CBSZ : BLGP, w = sub_width(subfmt);
     std::mt19937 rng = fpsan_test::make_rng();
     const int    sa = 128, sb = 130;
-    using VF   = Value<float, Semantics::FPSan, kCC>;
-    using VFp8 = Value<Fp8Elem, Semantics::FPSan, kCC>;
+    using VF   = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using VFp8 = Value<Fp8Elem, Semantics::FPSanLikeTriton, kCC>;
     const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
     std::vector<float> fp8mat(AIsSub ? SK * SN : SM * SK), Cm(SM * SN);
     std::vector<int>   subpay(AIsSub ? SM * SK : SK * SN);
@@ -2891,10 +2891,10 @@ void run_scale16_mixed_fpsan()
         hipMemcpy(dSub, sub.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMalloc(&dD, SM * SN * sizeof(std::uint32_t)));
     if constexpr(AIsSub)
-        k_scale16_mix_b8<Semantics::FPSan, std::uint32_t, Fp8Elem, CBSZ, BLGP>
+        k_scale16_mix_b8<Semantics::FPSanLikeTriton, std::uint32_t, Fp8Elem, CBSZ, BLGP>
             <<<1, WAVE>>>(dSub, dF, dC, dD, sa, sb);
     else
-        k_scale16_mix_a8<Semantics::FPSan, std::uint32_t, Fp8Elem, CBSZ, BLGP>
+        k_scale16_mix_a8<Semantics::FPSanLikeTriton, std::uint32_t, Fp8Elem, CBSZ, BLGP>
             <<<1, WAVE>>>(dF, dSub, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(SM * SN);
@@ -2953,7 +2953,7 @@ __global__ void k_scale32_mix_a8(
             auto loc = fpsan::detail::output_loc_32(S2M, S2N, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * S2N + j] = d.get(loc.reg).to_float();
                 else
                     D[i * S2N + j] = d.get(loc.reg).fpsan_payload();
@@ -2993,7 +2993,7 @@ __global__ void k_scale32_mix_b8(
             auto loc = fpsan::detail::output_loc_32(S2M, S2N, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * S2N + j] = d.get(loc.reg).to_float();
                 else
                     D[i * S2N + j] = d.get(loc.reg).fpsan_payload();
@@ -3060,10 +3060,10 @@ void run_scale32_mixed()
         hipMemcpy(dSub, sub.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
     HIP_CHECK(hipMalloc(&dD, S2M * S2N * sizeof(float)));
     if constexpr(AIsSub)
-        k_scale32_mix_b8<Semantics::Float, float, Fp8Elem, CBSZ, BLGP>
+        k_scale32_mix_b8<Semantics::Native, float, Fp8Elem, CBSZ, BLGP>
             <<<1, WAVE>>>(dSub, dF, dC, dD, sa, sb);
     else
-        k_scale32_mix_a8<Semantics::Float, float, Fp8Elem, CBSZ, BLGP>
+        k_scale32_mix_a8<Semantics::Native, float, Fp8Elem, CBSZ, BLGP>
             <<<1, WAVE>>>(dF, dSub, dC, dD, sa, sb);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(S2M * S2N);
@@ -3128,7 +3128,7 @@ __global__ void
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * g + reg, j = nlane;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * QN + j] = d.get(reg).to_float();
         else
             D[i * QN + j] = d.get(reg).fpsan_payload();
@@ -3213,7 +3213,7 @@ TEST(SmfmacF16_16x16x64, LayoutMatchesHardware)
     float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
     int*   dI = to_dev(m.idxbuf);
     HIP_CHECK(hipMalloc(&dD, QM * QN * sizeof(float)));
-    k_smf64<Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    k_smf64<Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(QM * QN);
     HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(float), hipMemcpyDeviceToHost));
@@ -3232,8 +3232,8 @@ TEST(SmfmacF16_16x16x64, FpsanMatchesScalarReference)
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
     SmfData m = make_smf_data();
-    using VF  = Value<float, Semantics::FPSan, kCC>;
-    using VH  = Value<_Float16, Semantics::FPSan, kCC>;
+    using VF  = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using VH  = Value<_Float16, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint32_t> ref(QM * QN);
     for(int i = 0; i < QM; ++i)
         for(int j = 0; j < QN; ++j)
@@ -3256,7 +3256,7 @@ TEST(SmfmacF16_16x16x64, FpsanMatchesScalarReference)
     int*           dI = to_dev(m.idxbuf);
     std::uint32_t* dD;
     HIP_CHECK(hipMalloc(&dD, QM * QN * sizeof(std::uint32_t)));
-    k_smf64<Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    k_smf64<Semantics::FPSanLikeTriton, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(QM * QN);
     HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -3311,7 +3311,7 @@ __global__ void
             auto loc = fpsan::detail::output_loc_32(TM, TN, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * TN + j] = d.get(loc.reg).to_float();
                 else
                     D[i * TN + j] = d.get(loc.reg).fpsan_payload();
@@ -3395,7 +3395,7 @@ TEST(SmfmacF16_32x32x32, LayoutMatchesHardware)
     float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
     int*   dI = to_dev(m.idxbuf);
     HIP_CHECK(hipMalloc(&dD, TM * TN * sizeof(float)));
-    k_smf32<Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    k_smf32<Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(TM * TN);
     HIP_CHECK(hipMemcpy(got.data(), dD, TM * TN * sizeof(float), hipMemcpyDeviceToHost));
@@ -3414,8 +3414,8 @@ TEST(SmfmacF16_32x32x32, FpsanMatchesScalarReference)
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
     Smf32Data m = make_smf32_data();
-    using VF    = Value<float, Semantics::FPSan, kCC>;
-    using VH    = Value<_Float16, Semantics::FPSan, kCC>;
+    using VF    = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using VH    = Value<_Float16, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint32_t> ref(TM * TN);
     for(int i = 0; i < TM; ++i)
         for(int j = 0; j < TN; ++j)
@@ -3438,7 +3438,7 @@ TEST(SmfmacF16_32x32x32, FpsanMatchesScalarReference)
     int*           dI = to_dev(m.idxbuf);
     std::uint32_t* dD;
     HIP_CHECK(hipMalloc(&dD, TM * TN * sizeof(std::uint32_t)));
-    k_smf32<Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    k_smf32<Semantics::FPSanLikeTriton, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(TM * TN);
     HIP_CHECK(hipMemcpy(got.data(), dD, TM * TN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -3485,7 +3485,7 @@ __global__ void
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * g + reg, j = nlane;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * QN + j] = d.get(reg).to_float();
         else
             D[i * QN + j] = d.get(reg).fpsan_payload();
@@ -3515,7 +3515,7 @@ TEST(SmfmacBf16_16x16x64, LayoutMatchesHardware)
     float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
     int*   dI = to_dev(m.idxbuf);
     HIP_CHECK(hipMalloc(&dD, QM * QN * sizeof(float)));
-    k_smf64_bf16<Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    k_smf64_bf16<Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(QM * QN);
     HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(float), hipMemcpyDeviceToHost));
@@ -3534,8 +3534,8 @@ TEST(SmfmacBf16_16x16x64, FpsanMatchesScalarReference)
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
     SmfData m = make_smf_data();
-    using VF  = Value<float, Semantics::FPSan, kCC>;
-    using VB  = Value<__bf16, Semantics::FPSan, kCC>;
+    using VF  = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using VB  = Value<__bf16, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint32_t> ref(QM * QN);
     for(int i = 0; i < QM; ++i)
         for(int j = 0; j < QN; ++j)
@@ -3558,7 +3558,7 @@ TEST(SmfmacBf16_16x16x64, FpsanMatchesScalarReference)
     int*           dI = to_dev(m.idxbuf);
     std::uint32_t* dD;
     HIP_CHECK(hipMalloc(&dD, QM * QN * sizeof(std::uint32_t)));
-    k_smf64_bf16<Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    k_smf64_bf16<Semantics::FPSanLikeTriton, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(QM * QN);
     HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -3606,7 +3606,7 @@ __global__ void
             auto loc = fpsan::detail::output_loc_32(TM, TN, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * TN + j] = d.get(loc.reg).to_float();
                 else
                     D[i * TN + j] = d.get(loc.reg).fpsan_payload();
@@ -3637,7 +3637,7 @@ TEST(SmfmacBf16_32x32x32, LayoutMatchesHardware)
     float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
     int*   dI = to_dev(m.idxbuf);
     HIP_CHECK(hipMalloc(&dD, TM * TN * sizeof(float)));
-    k_smf32_bf16<Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    k_smf32_bf16<Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(TM * TN);
     HIP_CHECK(hipMemcpy(got.data(), dD, TM * TN * sizeof(float), hipMemcpyDeviceToHost));
@@ -3656,8 +3656,8 @@ TEST(SmfmacBf16_32x32x32, FpsanMatchesScalarReference)
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
     Smf32Data m = make_smf32_data();
-    using VF    = Value<float, Semantics::FPSan, kCC>;
-    using VB    = Value<__bf16, Semantics::FPSan, kCC>;
+    using VF    = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using VB    = Value<__bf16, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint32_t> ref(TM * TN);
     for(int i = 0; i < TM; ++i)
         for(int j = 0; j < TN; ++j)
@@ -3680,7 +3680,7 @@ TEST(SmfmacBf16_32x32x32, FpsanMatchesScalarReference)
     int*           dI = to_dev(m.idxbuf);
     std::uint32_t* dD;
     HIP_CHECK(hipMalloc(&dD, TM * TN * sizeof(std::uint32_t)));
-    k_smf32_bf16<Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    k_smf32_bf16<Semantics::FPSanLikeTriton, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(TM * TN);
     HIP_CHECK(hipMemcpy(got.data(), dD, TM * TN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -3729,7 +3729,7 @@ __global__ void k_smf1632(const float* A, const float* B, const float* C, const 
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * g + reg, j = nl;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * HN + j] = d.get(reg).to_float();
         else
             D[i * HN + j] = d.get(reg).fpsan_payload();
@@ -3772,7 +3772,7 @@ __global__ void k_smf3216(const float* A, const float* B, const float* C, const 
             auto loc = fpsan::detail::output_loc_32(UM, UN, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * UN + j] = d.get(loc.reg).to_float();
                 else
                     D[i * UN + j] = d.get(loc.reg).fpsan_payload();
@@ -3853,9 +3853,9 @@ static void cdna3_layout_test(int Mm, int Nn, int Kk)
     int*   dI = to_dev(m.idxbuf);
     HIP_CHECK(hipMalloc(&dD, Mm * Nn * sizeof(float)));
     if(Mm == 16)
-        k_smf1632<E, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        k_smf1632<E, Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     else
-        k_smf3216<E, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        k_smf3216<E, Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(Mm * Nn);
     HIP_CHECK(hipMemcpy(got.data(), dD, Mm * Nn * sizeof(float), hipMemcpyDeviceToHost));
@@ -3876,8 +3876,8 @@ static void cdna3_fpsan_test(int Mm, int Nn, int Kk)
         GTEST_SKIP() << "no HIP device";
     const int    G = Kk / 4, Cc = 2 * G;
     SmfCdna3Data m = make_cdna3(Mm, Nn, Kk);
-    using VF       = Value<float, Semantics::FPSan, kCC>;
-    using VE       = Value<E, Semantics::FPSan, kCC>;
+    using VF       = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using VE       = Value<E, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint32_t> ref(Mm * Nn);
     for(int i = 0; i < Mm; ++i)
         for(int j = 0; j < Nn; ++j)
@@ -3899,9 +3899,9 @@ static void cdna3_fpsan_test(int Mm, int Nn, int Kk)
     std::uint32_t* dD;
     HIP_CHECK(hipMalloc(&dD, Mm * Nn * sizeof(std::uint32_t)));
     if(Mm == 16)
-        k_smf1632<E, Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        k_smf1632<E, Semantics::FPSanLikeTriton, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     else
-        k_smf3216<E, Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        k_smf3216<E, Semantics::FPSanLikeTriton, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(Mm * Nn);
     HIP_CHECK(hipMemcpy(got.data(), dD, Mm * Nn * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -3995,7 +3995,7 @@ __global__ void
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * g + reg, j = nl;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * FW + j] = d.get(reg).to_float();
         else
             D[i * FW + j] = d.get(reg).fpsan_payload();
@@ -4049,7 +4049,7 @@ __global__ void
             auto loc = fpsan::detail::output_loc_32(FX, FX, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * FX + j] = d.get(loc.reg).to_float();
                 else
                     D[i * FX + j] = d.get(loc.reg).fpsan_payload();
@@ -4110,9 +4110,9 @@ static void fp8_smf_test(int Mm, int Kk)
     // Float-mode layout reference (host integer matmul, exact small ints).
     std::vector<float> ref(Mm * Nn);
     // FPSan reference (payload ring).
-    using VF = Value<float, Semantics::FPSan, kCC>;
-    using VA = Value<AE, Semantics::FPSan, kCC>;
-    using VB = Value<BE, Semantics::FPSan, kCC>;
+    using VF = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using VA = Value<AE, Semantics::FPSanLikeTriton, kCC>;
+    using VB = Value<BE, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint32_t> refp(Mm * Nn);
     for(int i = 0; i < Mm; ++i)
         for(int j = 0; j < Nn; ++j)
@@ -4142,15 +4142,15 @@ static void fp8_smf_test(int Mm, int Kk)
     HIP_CHECK(hipMalloc(&dDp, Mm * Nn * sizeof(std::uint32_t)));
     if(Mm == 16)
     {
-        k_smf_fp8_1664<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
+        k_smf_fp8_1664<AE, BE, Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
         HIP_CHECK(hipDeviceSynchronize());
-        k_smf_fp8_1664<AE, BE, Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dDp);
+        k_smf_fp8_1664<AE, BE, Semantics::FPSanLikeTriton, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dDp);
     }
     else
     {
-        k_smf_fp8_3232<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
+        k_smf_fp8_3232<AE, BE, Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
         HIP_CHECK(hipDeviceSynchronize());
-        k_smf_fp8_3232<AE, BE, Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dDp);
+        k_smf_fp8_3232<AE, BE, Semantics::FPSanLikeTriton, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dDp);
     }
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         gotf(Mm * Nn);
@@ -4251,7 +4251,7 @@ __global__ void
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * g + reg, j = nl;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * GW + j] = d.get(reg).to_float();
         else
             D[i * GW + j] = d.get(reg).fpsan_payload();
@@ -4305,7 +4305,7 @@ __global__ void
             auto loc = fpsan::detail::output_loc_32(GX, GX, i, j, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * GX + j] = d.get(loc.reg).to_float();
                 else
                     D[i * GX + j] = d.get(loc.reg).fpsan_payload();
@@ -4371,9 +4371,9 @@ static void fp8big_smf_test(int Mm, int Kk)
     const int          G = Kk / 4, Cc = 2 * G, Nn = Mm;
     SmfCdna3Data       m = make_fp8big(Mm, Kk);
     std::vector<float> ref(Mm * Nn);
-    using VF = Value<float, Semantics::FPSan, kCC>;
-    using VA = Value<AE, Semantics::FPSan, kCC>;
-    using VB = Value<BE, Semantics::FPSan, kCC>;
+    using VF = Value<float, Semantics::FPSanLikeTriton, kCC>;
+    using VA = Value<AE, Semantics::FPSanLikeTriton, kCC>;
+    using VB = Value<BE, Semantics::FPSanLikeTriton, kCC>;
     std::vector<std::uint32_t> refp(Mm * Nn);
     for(int i = 0; i < Mm; ++i)
         for(int j = 0; j < Nn; ++j)
@@ -4403,16 +4403,16 @@ static void fp8big_smf_test(int Mm, int Kk)
     HIP_CHECK(hipMalloc(&dDp, Mm * Nn * sizeof(std::uint32_t)));
     if(Mm == 16)
     {
-        k_smf_fp8big_16128<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
+        k_smf_fp8big_16128<AE, BE, Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
         HIP_CHECK(hipDeviceSynchronize());
-        k_smf_fp8big_16128<AE, BE, Semantics::FPSan, std::uint32_t>
+        k_smf_fp8big_16128<AE, BE, Semantics::FPSanLikeTriton, std::uint32_t>
             <<<1, WAVE>>>(dA, dB, dC, dI, dDp);
     }
     else
     {
-        k_smf_fp8big_3264<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
+        k_smf_fp8big_3264<AE, BE, Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
         HIP_CHECK(hipDeviceSynchronize());
-        k_smf_fp8big_3264<AE, BE, Semantics::FPSan, std::uint32_t>
+        k_smf_fp8big_3264<AE, BE, Semantics::FPSanLikeTriton, std::uint32_t>
             <<<1, WAVE>>>(dA, dB, dC, dI, dDp);
     }
     HIP_CHECK(hipDeviceSynchronize());

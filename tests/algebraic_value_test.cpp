@@ -35,7 +35,7 @@ static V mac(const float* a, const float* b, int n, const int* order)
 int main()
 {
     using Alg   = F<Semantics::FPSanAlgebraic1>;
-    using Scr   = F<Semantics::FPSan>; // Triton-style free model
+    using Scr   = F<Semantics::FPSanLikeTriton>; // Triton-style free model
 
     // ---- algebraic = value model: rational identities hold within a width ----
     check((Alg{2.0f} + Alg{2.0f}) == Alg{4.0f}, "alg: 2+2 == 4");
@@ -154,8 +154,8 @@ int main()
         int   o1[4] = {0, 1, 2, 3};
         int   o2[4] = {3, 1, 0, 2}; // a different accumulation order
         // compiles & runs identically for Float, FPSan, and the algebraic variants:
-        (void)mac<F<Semantics::Float>>(A, B, 4, o1);
-        (void)mac<F<Semantics::FPSan>>(A, B, 4, o1);
+        (void)mac<F<Semantics::Native>>(A, B, 4, o1);
+        (void)mac<F<Semantics::FPSanLikeTriton>>(A, B, 4, o1);
         check(mac<Alg>(A, B, 4, o1) == mac<Alg>(A, B, 4, o2),
               "alg: matmul is reassociation-invariant (sanitizer property)");
         check(mac<Exp>(A, B, 4, o1) == mac<Exp>(A, B, 4, o2),
