@@ -83,6 +83,14 @@ int main()
     check(exp(Alg{1.25f} + Alg{2.5f}) != exp(Alg{1.25f}) * exp(Alg{2.5f}),
           "field: exp is NOT a homomorphism (tagged token)");
 
+    // Exp2 is an independent variant: its own exp homomorphism, distinct modulus.
+    using Exp2 = F<Semantics::FPSanAlgebraicExponentials2>;
+    check(exp(Exp2{1.5f} + Exp2{2.5f}) == exp(Exp2{1.5f}) * exp(Exp2{2.5f}),
+          "exp2-variant: exp(a+b)==exp(a)*exp(b)");
+    // 0.5 -> (n+1)/2 differs between the two moduli (small integers wouldn't).
+    check(Exp{0.5f}.fpsan_payload() != Exp2{0.5f}.fpsan_payload(),
+          "Exp1 and Exp2 use distinct moduli (different residue for 0.5)");
+
     // ---- Inf / NaN reach the payload, via 1/0 ----
     check(((Alg{1.0f} / Alg{0.0f}) / (Alg{1.0f} / Alg{0.0f})) == (Alg{1.0f} / Alg{0.0f}) /
               (Alg{1.0f} / Alg{0.0f}),

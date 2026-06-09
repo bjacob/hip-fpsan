@@ -78,16 +78,22 @@ namespace fpsan
             default: return 0;
             }
         }
-        FPSAN_HOST_DEVICE constexpr AlgModulus alg_exp_pair(AlgVariant /*v*/, unsigned w)
+        FPSAN_HOST_DEVICE constexpr AlgModulus alg_exp_pair(AlgVariant v, unsigned w)
         {
-            // (Only Exp1 wired with data; Exp2 reuses the same shapes at other
-            // widths in this prototype -- a second independent pair per width is a
-            // one-line table addition.)
+            // Two independent Sophie-Germain pairs (p = 2d+1) per width; g has
+            // order d in (Z/n)^*. Exp1 uses the largest pair, Exp2 the next --
+            // distinct moduli so the two variants are genuinely independent runs.
+            const bool e1 = (v == AlgVariant::Exp1);
             switch(w)
             {
-            case 8: return {253u, 188u, 11u, true};
-            case 16: return {64261u, 63188u, 179u, true};
-            case 32: return {4274287111u, 4274009738u, 46229u, true};
+            case 8:
+                return e1 ? AlgModulus{253u, 188u, 11u, true} : AlgModulus{55u, 26u, 5u, true};
+            case 16:
+                return e1 ? AlgModulus{64261u, 63188u, 179u, true}
+                          : AlgModulus{60031u, 58994u, 173u, true};
+            case 32:
+                return e1 ? AlgModulus{4274287111u, 4274009738u, 46229u, true}
+                          : AlgModulus{4268741401u, 4268464208u, 46199u, true};
             default: return {};
             }
         }
