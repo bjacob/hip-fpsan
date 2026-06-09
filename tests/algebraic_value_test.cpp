@@ -34,7 +34,7 @@ static V mac(const float* a, const float* b, int n, const int* order)
 
 int main()
 {
-    using Alg   = F<Semantics::FPSanAlgebraic1>;
+    using Alg   = F<Semantics::FPSanAlgebraic>;
     using Scr   = F<Semantics::FPSanLikeTriton>; // Triton-style free model
 
     // ---- algebraic = value model: rational identities hold within a width ----
@@ -65,7 +65,7 @@ int main()
     check((Alg2{2.0f} + Alg2{2.0f}) == Alg2{4.0f}, "alg2: 2+2 == 4");
 
     // ---- the Exponentials variant honors exp(a+b) == exp(a)*exp(b) ----
-    using Exp = F<Semantics::FPSanAlgebraicExponentials1>;
+    using Exp = F<Semantics::FPSanAlgebraicExponentials>;
     check(exp(Exp{0.0f}) == Exp{1.0f}, "exp: exp(0) == 1");
     {
         long ok = 0, n = 0;
@@ -112,7 +112,7 @@ int main()
           "field: log is NOT a homomorphism (tagged token)");
 
     // ---- Trigonometry variant: genuine sin/cos angle-addition (order-d rotation)
-    using Trig = F<Semantics::FPSanAlgebraicTrigonometry1>;
+    using Trig = F<Semantics::FPSanAlgebraicTrigonometry>;
     check(cos(Trig{0.0f}) == Trig{1.0f}, "trig: cos(0) == 1");
     check(sin(Trig{0.0f}) == Trig{0.0f}, "trig: sin(0) == 0");
     {
@@ -216,7 +216,7 @@ int main()
     // ---- cast: same-width is identity; cross-width is deterministic ----
     check(cast<float>(Alg{1.25f}) == Alg{1.25f}, "alg: same-width cast is identity");
     {
-        using H = Value<_Float16, Semantics::FPSanAlgebraic1, Conversions::Explicit>;
+        using H = Value<_Float16, Semantics::FPSanAlgebraic, Conversions::Explicit>;
         H h1 = cast<_Float16>(Alg{1.5f});
         H h2 = cast<_Float16>(Alg{1.5f});
         check(h1 == h2, "alg: cross-width cast is deterministic");

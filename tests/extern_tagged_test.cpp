@@ -23,7 +23,7 @@ using Conv = fpsan::Conversions;
 template <fpsan::Semantics S>
 using F = Value<float, S, Conv::Explicit>;
 using Scr = F<fpsan::Semantics::FPSanLikeTriton>;
-using Alg = F<fpsan::Semantics::FPSanAlgebraic1>;
+using Alg = F<fpsan::Semantics::FPSanAlgebraic>;
 
 template <class T, int N>
 using vec = T __attribute__((ext_vector_type(N)));

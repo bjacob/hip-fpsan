@@ -40,11 +40,11 @@ namespace fpsan
         // (see detail/algebraic.hpp). Field* are prime moduli (a field; no exp);
         // Exponentials* are CRT moduli carrying exp(a+b)=exp(a)exp(b) (and log);
         // Trigonometry* (p=4d+1) add sin/cos.
-        FPSanAlgebraic1,
+        FPSanAlgebraic,
         FPSanAlgebraic2,
-        FPSanAlgebraicExponentials1,
+        FPSanAlgebraicExponentials,
         FPSanAlgebraicExponentials2,
-        FPSanAlgebraicTrigonometry1,
+        FPSanAlgebraicTrigonometry,
         FPSanAlgebraicTrigonometry2,
 
         // Deprecated former spellings, kept as value-preserving aliases so old
@@ -63,10 +63,10 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr bool is_algebraic_semantics(Semantics s)
         {
-            return s == Semantics::FPSanAlgebraic1 || s == Semantics::FPSanAlgebraic2
-                   || s == Semantics::FPSanAlgebraicExponentials1
+            return s == Semantics::FPSanAlgebraic || s == Semantics::FPSanAlgebraic2
+                   || s == Semantics::FPSanAlgebraicExponentials
                    || s == Semantics::FPSanAlgebraicExponentials2
-                   || s == Semantics::FPSanAlgebraicTrigonometry1
+                   || s == Semantics::FPSanAlgebraicTrigonometry
                    || s == Semantics::FPSanAlgebraicTrigonometry2;
         }
         // Map the public Semantics onto the algebra-layer variant.
@@ -75,11 +75,11 @@ namespace fpsan
             switch(s)
             {
             case Semantics::FPSanAlgebraic2: return AlgVariant::Field2;
-            case Semantics::FPSanAlgebraicExponentials1: return AlgVariant::Exp1;
+            case Semantics::FPSanAlgebraicExponentials: return AlgVariant::Exp1;
             case Semantics::FPSanAlgebraicExponentials2: return AlgVariant::Exp2;
-            case Semantics::FPSanAlgebraicTrigonometry1: return AlgVariant::Trig1;
+            case Semantics::FPSanAlgebraicTrigonometry: return AlgVariant::Trig1;
             case Semantics::FPSanAlgebraicTrigonometry2: return AlgVariant::Trig2;
-            default: return AlgVariant::Field1; // FPSanAlgebraic1
+            default: return AlgVariant::Field1; // FPSanAlgebraic
             }
         }
     } // namespace detail
