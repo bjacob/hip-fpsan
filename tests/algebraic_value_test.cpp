@@ -111,6 +111,36 @@ int main()
     check(log(Alg{2.0f} * Alg{3.0f}) != log(Alg{2.0f}) + log(Alg{3.0f}),
           "field: log is NOT a homomorphism (tagged token)");
 
+    // ---- Trigonometry variant: genuine sin/cos angle-addition (order-d rotation)
+    using Trig = F<Semantics::FPSanAlgebraicTrigonometry1>;
+    check(cos(Trig{0.0f}) == Trig{1.0f}, "trig: cos(0) == 1");
+    check(sin(Trig{0.0f}) == Trig{0.0f}, "trig: sin(0) == 0");
+    {
+        long  ok = 0, n = 0;
+        float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, -1.0f, 0.25f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Trig a{u}, b{v};
+                bool c1 = (cos(a + b) == cos(a) * cos(b) - sin(a) * sin(b));
+                bool c2 = (sin(a + b) == sin(a) * cos(b) + cos(a) * sin(b));
+                ok += (c1 && c2);
+                ++n;
+            }
+        check(ok == n, "trig: angle-addition for sin & cos (Trig variant)");
+    }
+    check(cos(Trig{1.3f}) * cos(Trig{1.3f}) + sin(Trig{1.3f}) * sin(Trig{1.3f}) == Trig{1.0f},
+          "trig: cos^2 + sin^2 == 1");
+    // a Trig variant ALSO carries exp + log (p=4d+1 keeps the d-channel)
+    check(exp(Trig{1.0f} + Trig{2.0f}) == exp(Trig{1.0f}) * exp(Trig{2.0f}),
+          "trig: exp homomorphism still holds");
+    check(log(Trig{2.0f} * Trig{3.0f}) == log(Trig{2.0f}) + log(Trig{3.0f}),
+          "trig: log homomorphism still holds");
+    // the Exp variant has NO angle-addition (sin/cos are tagged tokens there)
+    check(cos(Exp{0.5f} + Exp{1.0f})
+              != cos(Exp{0.5f}) * cos(Exp{1.0f}) - sin(Exp{0.5f}) * sin(Exp{1.0f}),
+          "exp-variant: sin/cos are tagged (no angle-addition)");
+
     // ---- Inf / NaN reach the payload, via 1/0 ----
     check(((Alg{1.0f} / Alg{0.0f}) / (Alg{1.0f} / Alg{0.0f})) == (Alg{1.0f} / Alg{0.0f}) /
               (Alg{1.0f} / Alg{0.0f}),

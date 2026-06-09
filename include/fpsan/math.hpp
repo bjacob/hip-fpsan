@@ -69,8 +69,7 @@ namespace fpsan
         if constexpr(F::semantics == Semantics::FPSan)
             return FPSAN_FROM_PAYLOAD(F, detail::payload_cos_sin(F::config, x.fpsan_payload()).cos);
         else if constexpr(F::is_algebraic)
-            return FPSAN_FROM_PAYLOAD(F,
-                                      detail::alg_tagged(F::alg_cfg(), x.fpsan_payload(), 0x636F73ull));
+            return FPSAN_FROM_PAYLOAD(F, detail::alg_cos(F::alg_cfg(), x.fpsan_payload()));
         else
             return F(static_cast<FT>(std::cos(static_cast<detail::compute_t<FT>>(x.to_float()))));
     }
@@ -81,8 +80,7 @@ namespace fpsan
         if constexpr(F::semantics == Semantics::FPSan)
             return FPSAN_FROM_PAYLOAD(F, detail::payload_cos_sin(F::config, x.fpsan_payload()).sin);
         else if constexpr(F::is_algebraic)
-            return FPSAN_FROM_PAYLOAD(F,
-                                      detail::alg_tagged(F::alg_cfg(), x.fpsan_payload(), 0x73696Eull));
+            return FPSAN_FROM_PAYLOAD(F, detail::alg_sin(F::alg_cfg(), x.fpsan_payload()));
         else
             return F(static_cast<FT>(std::sin(static_cast<detail::compute_t<FT>>(x.to_float()))));
     }

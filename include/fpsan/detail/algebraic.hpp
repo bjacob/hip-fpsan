@@ -50,15 +50,22 @@ namespace fpsan
             Field1,
             Field2,
             Exp1,
-            Exp2
+            Exp2,
+            Trig1,
+            Trig2
         };
 
         struct AlgModulus
         {
-            u64  n       = 0; // modulus; residues in [0, n)
-            u64  g       = 0; // exp generator (order d); unused if !has_exp
-            u64  d       = 0; // exp exponent modulus; unused if !has_exp
-            bool has_exp = false;
+            u64  n        = 0; // modulus; residues in [0, n)
+            u64  g        = 0; // exp/log generator (order d); unused if !has_exp
+            u64  d        = 0; // exp/log/trig exponent modulus; unused if !has_exp
+            bool has_exp  = false;
+            // order-d rotation element of (Z/n)[i] (i^2=-1) for sin/cos: a genuine
+            // rotation in the F_p factor, identity in the F_d factor. Trig only.
+            u64  omega_re = 0;
+            u64  omega_im = 0;
+            bool has_trig = false;
         };
 
         // ---- the constants table (the only per-(variant x width) data) ----------
@@ -67,7 +74,8 @@ namespace fpsan
         // not wired yet (needs 128-bit modular multiply); it static_asserts below.
         FPSAN_HOST_DEVICE constexpr u64 alg_field_prime(AlgVariant v, unsigned w)
         {
-            const bool a = (v == AlgVariant::Field1 || v == AlgVariant::Exp1);
+            const bool a = (v == AlgVariant::Field1 || v == AlgVariant::Exp1
+                            || v == AlgVariant::Trig1);
             switch(w)
             {
             case 4: return a ? 13u : 11u;
@@ -76,6 +84,31 @@ namespace fpsan
             case 16: return a ? 65521u : 65519u;
             case 32: return a ? 4294967291u : 4294967279u;
             default: return 0;
+            }
+        }
+        // Trigonometry variants: p = 4d+1 (so p == 1 mod 4 -> the circle group has
+        // order p-1, divisible by d, so a genuine order-d rotation exists). g is the
+        // order-d exp/log generator (d | p-1), omega the order-d rotation element of
+        // (Z/n)[i] -- a rotation in the F_p factor, identity in the F_d factor. d is
+        // ~sqrt(2) smaller than the Exp variants at the same width (more collisions),
+        // the price for sin/cos. See the offline derivation in this commit message.
+        FPSAN_HOST_DEVICE constexpr AlgModulus alg_trig_pair(AlgVariant v, unsigned w)
+        {
+            const bool t1 = (v == AlgVariant::Trig1);
+            switch(w)
+            {
+            case 8:
+                return t1 ? AlgModulus{203u, 190u, 7u, true, 134u, 140u, true}
+                          : AlgModulus{39u, 16u, 3u, true, 19u, 24u, true};
+            case 16:
+                return t1 ? AlgModulus{64643u, 57024u, 127u, true, 36831u, 62992u, true}
+                          : AlgModulus{37733u, 31914u, 97u, true, 20856u, 11252u, true};
+            case 32:
+                return t1 ? AlgModulus{4279024103u, 4277061684u, 32707u, true, 2673470181u,
+                                       2323668815u, true}
+                          : AlgModulus{4263339083u, 4261380264u, 32647u, true, 2663668731u,
+                                       1327688196u, true};
+            default: return {};
             }
         }
         FPSAN_HOST_DEVICE constexpr AlgModulus alg_exp_pair(AlgVariant v, unsigned w)
@@ -100,10 +133,13 @@ namespace fpsan
 
         FPSAN_HOST_DEVICE constexpr AlgModulus alg_modulus(AlgVariant v, unsigned w)
         {
-            const bool is_exp = (v == AlgVariant::Exp1 || v == AlgVariant::Exp2);
+            const bool is_exp  = (v == AlgVariant::Exp1 || v == AlgVariant::Exp2);
+            const bool is_trig = (v == AlgVariant::Trig1 || v == AlgVariant::Trig2);
             if(is_exp && w >= 8)
                 return alg_exp_pair(v, w);
-            // Field variant, or Exp below 8 bits -> field prime, no exp.
+            if(is_trig && w >= 8)
+                return alg_trig_pair(v, w);
+            // Field variant, or exp/trig below 8 bits -> field prime, no exp/trig.
             return {alg_field_prime(v, w), 0u, 0u, false};
         }
 
@@ -117,6 +153,9 @@ namespace fpsan
             u64 inf_code = 0; // = n
             u64 nan_code = 0; // = n + 1
             bool has_exp = false;
+            u64  omega_re = 0; // order-d rotation element of (Z/n)[i], for sin/cos
+            u64  omega_im = 0;
+            bool has_trig = false;
             // decoded float format of the element type:
             unsigned bit_width = 0;
             unsigned mant_bits = 0;
@@ -139,6 +178,9 @@ namespace fpsan
             c.g           = m.g;
             c.d           = m.d;
             c.has_exp     = m.has_exp;
+            c.omega_re    = m.omega_re;
+            c.omega_im    = m.omega_im;
+            c.has_trig    = m.has_trig;
             c.inv2        = (m.n + 1) / 2; // inverse of 2 mod odd n
             c.inf_code    = m.n;
             c.nan_code    = m.n + 1;
@@ -448,6 +490,65 @@ namespace fpsan
         FPSAN_HOST_DEVICE constexpr Bits alg_log(const AlgConfig& c, Bits r)
         {
             return alg_lanewise1(r, [&](u64 x) { return alg_log1(c, x); });
+        }
+
+        // ---- sin / cos via an order-d rotation in (Z/n)[i], i^2 = -1 (Trig only) -
+        // cos(x)=Re(omega^(x mod d)), sin(x)=Im(omega^(x mod d)). Since omega has
+        // order d and the complex multiplication realizes the rotation, the
+        // angle-addition formulas hold exactly in Z/n. Non-Trig variants keep
+        // sin/cos as tagged tokens.
+        struct AlgC
+        {
+            u64 re = 0, im = 0;
+        };
+        FPSAN_HOST_DEVICE constexpr AlgC alg_cmul(AlgC a, AlgC b, u64 n)
+        {
+            // (ar+ai i)(br+bi i) = (ar br - ai bi) + (ar bi + ai br) i  mod n
+            const u64 re = ((a.re * b.re) % n + n - (a.im * b.im) % n) % n;
+            const u64 im = ((a.re * b.im) % n + (a.im * b.re) % n) % n;
+            return {re, im};
+        }
+        FPSAN_HOST_DEVICE constexpr AlgC alg_cpow(AlgC base, u64 e, u64 n)
+        {
+            AlgC r{1 % n, 0};
+            while(e)
+            {
+                if(e & 1)
+                    r = alg_cmul(r, base, n);
+                base = alg_cmul(base, base, n);
+                e >>= 1;
+            }
+            return r;
+        }
+        FPSAN_HOST_DEVICE constexpr AlgC alg_rotor(const AlgConfig& c, u64 r)
+        {
+            return alg_cpow({c.omega_re, c.omega_im}, r % c.d, c.n);
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_cos1(const AlgConfig& c, u64 r)
+        {
+            if(!c.has_trig)
+                return alg_tagged1(c, r, 0x636F73ull /*"cos"*/);
+            if(!alg_is_fin(c, r))
+                return c.nan_code;
+            return alg_rotor(c, r).re;
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_sin1(const AlgConfig& c, u64 r)
+        {
+            if(!c.has_trig)
+                return alg_tagged1(c, r, 0x73696Eull /*"sin"*/);
+            if(!alg_is_fin(c, r))
+                return c.nan_code;
+            return alg_rotor(c, r).im;
+        }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_cos(const AlgConfig& c, Bits r)
+        {
+            return alg_lanewise1(r, [&](u64 x) { return alg_cos1(c, x); });
+        }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_sin(const AlgConfig& c, Bits r)
+        {
+            return alg_lanewise1(r, [&](u64 x) { return alg_sin1(c, x); });
         }
 
     } // namespace detail

@@ -42,7 +42,12 @@ namespace fpsan
         FPSanAlgebraic1,
         FPSanAlgebraic2,
         FPSanAlgebraicExponentials1,
-        FPSanAlgebraicExponentials2
+        FPSanAlgebraicExponentials2,
+        // CRT variants on p = 4d+1 primes: exp + log AND sin/cos (order-d
+        // rotation), at a ~sqrt(2)-smaller d (more collisions) -- opt-in for
+        // trig-heavy code.
+        FPSanAlgebraicTrigonometry1,
+        FPSanAlgebraicTrigonometry2
     };
 
     namespace detail
@@ -56,7 +61,9 @@ namespace fpsan
         {
             return s == Semantics::FPSanAlgebraic1 || s == Semantics::FPSanAlgebraic2
                    || s == Semantics::FPSanAlgebraicExponentials1
-                   || s == Semantics::FPSanAlgebraicExponentials2;
+                   || s == Semantics::FPSanAlgebraicExponentials2
+                   || s == Semantics::FPSanAlgebraicTrigonometry1
+                   || s == Semantics::FPSanAlgebraicTrigonometry2;
         }
         // Map the public Semantics onto the algebra-layer variant.
         FPSAN_HOST_DEVICE constexpr AlgVariant alg_variant_of(Semantics s)
@@ -66,6 +73,8 @@ namespace fpsan
             case Semantics::FPSanAlgebraic2: return AlgVariant::Field2;
             case Semantics::FPSanAlgebraicExponentials1: return AlgVariant::Exp1;
             case Semantics::FPSanAlgebraicExponentials2: return AlgVariant::Exp2;
+            case Semantics::FPSanAlgebraicTrigonometry1: return AlgVariant::Trig1;
+            case Semantics::FPSanAlgebraicTrigonometry2: return AlgVariant::Trig2;
             default: return AlgVariant::Field1; // FPSanAlgebraic1
             }
         }
