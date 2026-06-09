@@ -88,6 +88,24 @@ static void test_width(const char* name, AlgVariant field, AlgVariant exp)
     }
     check(eh == en, "exp(a+b)=exp(a)*exp(b) (CRT)");
     check(alg_exp1(ce, 0) == 1, "exp(0)=1");
+
+    // exp2 is a second homomorphism on the same channel; log2 inverts it
+    long e2 = 0, l2 = 0;
+    seed = 999;
+    for(int k = 0; k < 5000; ++k)
+    {
+        seed     = seed * 6364136223846793005ull + 1;
+        u64 a    = (seed >> 11) % ce.n;
+        seed     = seed * 6364136223846793005ull + 1;
+        u64 b    = (seed >> 11) % ce.n;
+        e2 += alg_exp2_1(ce, alg_add1(ce, a, b)) == alg_mul1(ce, alg_exp2_1(ce, a), alg_exp2_1(ce, b));
+        l2 += alg_exp2_1(ce, alg_log2_1(ce, alg_exp2_1(ce, a))) == alg_exp2_1(ce, a);
+    }
+    check(e2 == en, "exp2(a+b)=exp2(a)*exp2(b) (CRT)");
+    check(l2 == en, "exp2(log2(exp2 v))=exp2 v (log2 inverts exp2)");
+    check(alg_exp2_1(ce, 0) == 1, "exp2(0)=1");
+    check(alg_exp2_1(ce, 1) != alg_exp1(ce, 1), "exp2 != exp (distinct base change)");
+
     // Field variant does NOT get the homomorphism (hash token)
     check(!cf.two_moduli, "Field variant has no exp");
 }

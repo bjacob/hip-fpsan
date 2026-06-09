@@ -50,15 +50,14 @@ namespace fpsan
         else                                                                                     \
             return F(static_cast<FT>(STD_FN(static_cast<detail::compute_t<FT>>(x.to_float())))); \
     }
-    // exp gets the genuine homomorphism g^(v mod d) (Exp variants); for the Field
-    // variants alg_exp falls back to a tagged token. exp2 has no honored identity
-    // in this prototype -> tagged token.
+    // exp and exp2 both get genuine homomorphisms g^(v mod d) on the order-d
+    // channel (Exp/Trig variants): exp(a+b)==exp(a)*exp(b) and likewise for exp2,
+    // which uses a fixed base change (see alg_exp2). For the Field variants both
+    // fall back to a tagged token.
     FPSAN_DEFINE_ALGEBRAIC_UNARY(exp, payload_exp,
                                  detail::alg_exp(F::alg_cfg(), x.fpsan_payload()), std::exp)
     FPSAN_DEFINE_ALGEBRAIC_UNARY(exp2, payload_exp2,
-                                 detail::alg_tagged(F::alg_cfg(), x.fpsan_payload(),
-                                                    0x65787032ull /*"exp2"*/),
-                                 std::exp2)
+                                 detail::alg_exp2(F::alg_cfg(), x.fpsan_payload()), std::exp2)
 #undef FPSAN_DEFINE_ALGEBRAIC_UNARY
 
     // cos / sin share one payload computation.
@@ -106,7 +105,6 @@ namespace fpsan
             return F(static_cast<FT>(NATIVE));                                                     \
         }                                                                                          \
     }
-    FPSAN_DEFINE_TAGGED_UNARY(log2, Log2, std::log2(v))
     FPSAN_DEFINE_TAGGED_UNARY(sqrt, Sqrt, std::sqrt(v))
     // precise_sqrt mirrors Triton's IEEE-correct sqrt: a distinct FPSan tag from
     // `sqrt`, but the same correctly-rounded std::sqrt in Float mode.
@@ -137,6 +135,26 @@ namespace fpsan
         {
             const detail::compute_t<FT> v = static_cast<detail::compute_t<FT>>(x.to_float());
             return F(static_cast<FT>(std::log(v)));
+        }
+    }
+
+    // log2 mirrors log: the Exp/Trig variants honor log2(x*y)=log2(x)+log2(y) as
+    // the exact inverse of exp2 on the order-d channel; FPSan and the Field
+    // variants keep it a tagged token.
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_HOST_DEVICE Value<FT, S, C> log2(Value<FT, S, C> x)
+    {
+        using F = Value<FT, S, C>;
+        if constexpr(F::semantics == Semantics::FPSanLikeTriton)
+            return FPSAN_FROM_PAYLOAD(F,
+                                      detail::payload_tagged_unary(
+                                          F::config, x.fpsan_payload(), detail::UnaryOpId::Log2));
+        else if constexpr(F::is_algebraic)
+            return FPSAN_FROM_PAYLOAD(F, detail::alg_log2(F::alg_cfg(), x.fpsan_payload()));
+        else
+        {
+            const detail::compute_t<FT> v = static_cast<detail::compute_t<FT>>(x.to_float());
+            return F(static_cast<FT>(std::log2(v)));
         }
     }
 

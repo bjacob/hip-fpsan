@@ -72,10 +72,13 @@ FPSan payloads; see the blog post linked above for the why.
 whose payload is the genuine residue `phi_n(value)` in `Z/nZ`, so they honor
 *all* rational-function identities (`2+2 == 4`, `x/x == 1`, …), not just the ring
 axioms: `Semantics::FPSanAlgebraic{1,2}` (prime modulus — a field),
-`FPSanAlgebraicExponentials{1,2}` (composite `n = p·d`, adding exact `exp`/`log`),
-and `FPSanAlgebraicTrigonometry{1,2}` (`p = 4d+1`, adding `sin`/`cos`). They flow
-through every intrinsic with no per-intrinsic changes. The math and trade-offs
-are in the `algebraic-fpsan.md` design notes (the bjacob/fpsan study).
+`FPSanAlgebraicExponentials{1,2}` (composite `n = p·d`, adding exact
+`exp`/`exp2`/`log`/`log2` homomorphisms), and `FPSanAlgebraicTrigonometry{1,2}`
+(`p = 4d+1`, adding `sin`/`cos`). Note these variants promote `log`/`log2` to
+genuine homomorphisms (the exact inverses of `exp`/`exp2`), where the free
+`FPSanLikeTriton`/Triton model keeps them as tagged tokens. They flow through
+every intrinsic with no per-intrinsic changes. The math and trade-offs are in
+the `algebraic-fpsan.md` design notes (the bjacob/fpsan study).
 
 ## Quick start
 

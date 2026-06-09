@@ -463,6 +463,27 @@ namespace fpsan
         // token. Undefined at a true zero (-> Inf pole) and where the value
         // vanishes in the F_p factor (-> NaN). The brute-force dlog is O(d);
         // a production device path would precompute a d-entry table.
+        // Raw discrete log on the order-d channel: the unique k in [0, d) with
+        // g^k == (r mod p)^(d+1) (r's order-d component) in F_p, or c.d as an
+        // out-of-range sentinel when r vanishes in the F_p factor. Shared by log
+        // and log2; the brute-force scan is O(d) (a device path would table it).
+        FPSAN_HOST_DEVICE constexpr u64 alg_dlog1(const AlgConfig& c, u64 r)
+        {
+            const u64 p  = c.n / c.d; // prime field factor (n = p*d)
+            const u64 rp = r % p;
+            if(rp == 0)
+                return c.d; // sentinel: value vanishes in the F_p factor
+            const u64 gp     = c.g % p;                  // order-d generator in F_p^*
+            const u64 target = alg_powmod(rp, c.d + 1, p); // r's order-d component
+            u64       cur    = 1 % p;
+            for(u64 k = 0; k < c.d; ++k)
+            {
+                if(cur == target)
+                    return k;
+                cur = (cur * gp) % p;
+            }
+            return c.d; // unreachable: target lies in <g>
+        }
         FPSAN_HOST_DEVICE constexpr u64 alg_log1(const AlgConfig& c, u64 r)
         {
             if(!c.two_moduli)
@@ -471,25 +492,64 @@ namespace fpsan
                 return c.nan_code; // log(Inf/NaN)
             if(r == 0)
                 return c.inf_code; // log(0) = -inf (unsigned pole)
-            const u64 p  = c.n / c.d; // prime field factor (n = p*d)
-            const u64 rp = r % p;
-            if(rp == 0)
-                return c.nan_code; // value vanishes in the F_p factor
-            const u64 gp     = c.g % p;                  // order-d generator in F_p^*
-            const u64 target = alg_powmod(rp, c.d + 1, p); // r's order-d component
-            u64       cur    = 1 % p;
-            for(u64 k = 0; k < c.d; ++k)
-            {
-                if(cur == target)
-                    return (p * k) % c.n; // (n/d)*k, in the additive order-d subgroup
-                cur = (cur * gp) % p;
-            }
-            return c.nan_code; // unreachable: target lies in <g>
+            const u64 k = alg_dlog1(c, r);
+            if(k >= c.d)
+                return c.nan_code; // vanishes in the F_p factor
+            // (n/d)*k, in the ADDITIVE order-d subgroup {0, n/d, ...} ~ Z/d.
+            return ((c.n / c.d) * k) % c.n;
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_log(const AlgConfig& c, Bits r)
         {
             return alg_lanewise1(r, [&](u64 x) { return alg_log1(c, x); });
+        }
+
+        // exp2 / log2: a second exp/log homomorphism pair on the SAME order-d
+        // channel, related to exp/log by a fixed base change exp2(v) = exp(K*v),
+        // i.e. exp2(x) == exp(x)^K. The true inter-base constant log2(e) is
+        // irrational, hence unrepresentable, so K is a fixed pseudo-random unit
+        // mod d (exactly the role Triton's rcpLog2 magic constant plays): exp2
+        // honors its OWN homomorphism exp2(a+b)==exp2(a)*exp2(b) and log2 is its
+        // exact inverse log2(x*y)==log2(x)+log2(y), but NO numeric relation to
+        // exp/log is claimed. Field variants (no d-channel) fall back to tokens.
+        FPSAN_HOST_DEVICE constexpr u64 alg_exp2_base(u64 d)
+        {
+            const u64 k = 2654435761ull % d; // Knuth golden-ratio multiplier, mod d
+            return (k <= 1) ? (2 % d) : k;   // tiny d (3,5): only base 2 is distinct
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_exp2_1(const AlgConfig& c, u64 a)
+        {
+            if(!c.two_moduli)
+                return alg_tagged1(c, a, 0x65787032ull /*"exp2"*/);
+            if(!alg_is_fin(c, a))
+                return c.nan_code;
+            const u64 K = alg_exp2_base(c.d);
+            return alg_powmod(c.g, (K * (a % c.d)) % c.d, c.n); // g^(K*v mod d)
+        }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_exp2(const AlgConfig& c, Bits a)
+        {
+            return alg_lanewise1(a, [&](u64 x) { return alg_exp2_1(c, x); });
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_log2_1(const AlgConfig& c, u64 r)
+        {
+            if(!c.two_moduli)
+                return alg_tagged1(c, r, 0x6C6F6732ull /*"log2"*/);
+            if(!alg_is_fin(c, r))
+                return c.nan_code;
+            if(r == 0)
+                return c.inf_code;
+            const u64 k = alg_dlog1(c, r);
+            if(k >= c.d)
+                return c.nan_code;
+            const u64 K    = alg_exp2_base(c.d);
+            const u64 Kinv = alg_powmod(K, c.d - 2, c.d); // K^(d-2) = K^-1 mod prime d
+            return ((c.n / c.d) * ((Kinv * k) % c.d)) % c.n;
+        }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_log2(const AlgConfig& c, Bits r)
+        {
+            return alg_lanewise1(r, [&](u64 x) { return alg_log2_1(c, x); });
         }
 
         // ---- sin / cos via an order-d rotation in (Z/n)[i], i^2 = -1 (Trig only) -

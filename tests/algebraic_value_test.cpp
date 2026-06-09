@@ -141,6 +141,47 @@ int main()
               != cos(Exp{0.5f}) * cos(Exp{1.0f}) - sin(Exp{0.5f}) * sin(Exp{1.0f}),
           "exp-variant: sin/cos are tagged (no angle-addition)");
 
+    // ---- exp2 / log2: a second homomorphism pair on the same order-d channel ----
+    check(exp2(Exp{0.0f}) == Exp{1.0f}, "exp2: exp2(0) == 1");
+    check(log2(Exp{1.0f}) == Exp{0.0f}, "log2: log2(1) == 0");
+    {
+        long  ok = 0, n = 0;
+        float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, -1.0f, 0.25f, 3.0f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                ok += (exp2(a + b) == exp2(a) * exp2(b));
+                ++n;
+            }
+        check(ok == n, "exp2: exp2(a+b) == exp2(a)*exp2(b) (Exponentials variant)");
+    }
+    {
+        long  ok = 0, n = 0;
+        float xs[] = {1.0f, 2.0f, 3.0f, 5.0f, 0.5f, 1.5f, 7.0f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                ok += (log2(a * b) == log2(a) + log2(b));
+                ++n;
+            }
+        check(ok == n, "log2: log2(x*y) == log2(x)+log2(y) (Exp variant, dlog homomorphism)");
+    }
+    check(exp2(log2(exp2(Exp{1.5f}))) == exp2(Exp{1.5f}), "log2: exp2(log2(exp2 v)) == exp2 v");
+    // exp2 uses a distinct base, so it is NOT the same fingerprint as exp
+    check(exp2(Exp{2.0f}) != exp(Exp{2.0f}), "exp2 != exp (distinct base change)");
+    // exp2/log2 carry over to the Trig variant (also a two-moduli channel)
+    check(exp2(Trig{1.0f} + Trig{2.0f}) == exp2(Trig{1.0f}) * exp2(Trig{2.0f}),
+          "trig: exp2 homomorphism still holds");
+    check(log2(Trig{2.0f} * Trig{3.0f}) == log2(Trig{2.0f}) + log2(Trig{3.0f}),
+          "trig: log2 homomorphism still holds");
+    // Field variant: exp2/log2 are tagged tokens, not homomorphisms
+    check(exp2(Alg{1.25f} + Alg{2.5f}) != exp2(Alg{1.25f}) * exp2(Alg{2.5f}),
+          "field: exp2 is NOT a homomorphism (tagged token)");
+    check(log2(Alg{2.0f} * Alg{3.0f}) != log2(Alg{2.0f}) + log2(Alg{3.0f}),
+          "field: log2 is NOT a homomorphism (tagged token)");
+
     // ---- Inf / NaN reach the payload, via 1/0 ----
     check(((Alg{1.0f} / Alg{0.0f}) / (Alg{1.0f} / Alg{0.0f})) == (Alg{1.0f} / Alg{0.0f}) /
               (Alg{1.0f} / Alg{0.0f}),
