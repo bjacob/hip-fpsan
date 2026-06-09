@@ -38,18 +38,27 @@ namespace fpsan
 #define FPSAN_FROM_PAYLOAD(F, expr) F::from_fpsan_payload(static_cast<typename F::bits_type>(expr))
 
 // ---- algebraic unary: exp, exp2, sin, cos ----------------------------------
-#define FPSAN_DEFINE_ALGEBRAIC_UNARY(NAME, PAYLOAD_FN, STD_FN)                                   \
+#define FPSAN_DEFINE_ALGEBRAIC_UNARY(NAME, PAYLOAD_FN, ALG_EXPR, STD_FN)                         \
     template <class FT, Semantics S, Conversions C>                                              \
     FPSAN_HOST_DEVICE Value<FT, S, C> NAME(Value<FT, S, C> x)                                    \
     {                                                                                            \
         using F = Value<FT, S, C>;                                                               \
         if constexpr(F::semantics == Semantics::FPSan)                                           \
             return FPSAN_FROM_PAYLOAD(F, detail::PAYLOAD_FN(F::config, x.fpsan_payload()));      \
+        else if constexpr(F::is_algebraic)                                                       \
+            return FPSAN_FROM_PAYLOAD(F, ALG_EXPR);                                              \
         else                                                                                     \
             return F(static_cast<FT>(STD_FN(static_cast<detail::compute_t<FT>>(x.to_float())))); \
     }
-    FPSAN_DEFINE_ALGEBRAIC_UNARY(exp, payload_exp, std::exp)
-    FPSAN_DEFINE_ALGEBRAIC_UNARY(exp2, payload_exp2, std::exp2)
+    // exp gets the genuine homomorphism g^(v mod d) (Exp variants); for the Field
+    // variants alg_exp falls back to a tagged token. exp2 has no honored identity
+    // in this prototype -> tagged token.
+    FPSAN_DEFINE_ALGEBRAIC_UNARY(exp, payload_exp,
+                                 detail::alg_exp(F::alg_cfg(), x.fpsan_payload()), std::exp)
+    FPSAN_DEFINE_ALGEBRAIC_UNARY(exp2, payload_exp2,
+                                 detail::alg_tagged(F::alg_cfg(), x.fpsan_payload(),
+                                                    0x65787032ull /*"exp2"*/),
+                                 std::exp2)
 #undef FPSAN_DEFINE_ALGEBRAIC_UNARY
 
     // cos / sin share one payload computation.
@@ -59,6 +68,9 @@ namespace fpsan
         using F = Value<FT, S, C>;
         if constexpr(F::semantics == Semantics::FPSan)
             return FPSAN_FROM_PAYLOAD(F, detail::payload_cos_sin(F::config, x.fpsan_payload()).cos);
+        else if constexpr(F::is_algebraic)
+            return FPSAN_FROM_PAYLOAD(F,
+                                      detail::alg_tagged(F::alg_cfg(), x.fpsan_payload(), 0x636F73ull));
         else
             return F(static_cast<FT>(std::cos(static_cast<detail::compute_t<FT>>(x.to_float()))));
     }
@@ -68,6 +80,9 @@ namespace fpsan
         using F = Value<FT, S, C>;
         if constexpr(F::semantics == Semantics::FPSan)
             return FPSAN_FROM_PAYLOAD(F, detail::payload_cos_sin(F::config, x.fpsan_payload()).sin);
+        else if constexpr(F::is_algebraic)
+            return FPSAN_FROM_PAYLOAD(F,
+                                      detail::alg_tagged(F::alg_cfg(), x.fpsan_payload(), 0x73696Eull));
         else
             return F(static_cast<FT>(std::sin(static_cast<detail::compute_t<FT>>(x.to_float()))));
     }
@@ -82,6 +97,11 @@ namespace fpsan
             return FPSAN_FROM_PAYLOAD(F,                                                           \
                                       detail::payload_tagged_unary(                                \
                                           F::config, x.fpsan_payload(), detail::UnaryOpId::OPID)); \
+        else if constexpr(F::is_algebraic)                                                         \
+            return FPSAN_FROM_PAYLOAD(                                                             \
+                F,                                                                                 \
+                detail::alg_tagged(F::alg_cfg(), x.fpsan_payload(),                                \
+                                   static_cast<detail::u64>(detail::UnaryOpId::OPID) + 0x100u));   \
         else                                                                                       \
         {                                                                                          \
             const detail::compute_t<FT> v = static_cast<detail::compute_t<FT>>(x.to_float());      \

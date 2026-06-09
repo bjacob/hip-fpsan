@@ -279,6 +279,21 @@ namespace fpsan
             return sign ? (r == 0 ? 0 : c.n - r) : r;
         }
 
+        // phi_n^{-1} is NOT well-defined (the residue does not determine the value),
+        // so this is a best-effort, non-faithful decode used only by to_float() for
+        // display: Inf/NaN map to the format's Inf/NaN bit patterns, and a finite
+        // residue is returned as-is (a deterministic but meaningless bit pattern).
+        // Algebraic Values are meant to be compared by payload, not unembedded.
+        FPSAN_HOST_DEVICE constexpr u64 alg_unembed1(const AlgConfig& c, u64 p)
+        {
+            if(c.has_inf_nan && p == c.inf_code)
+                return c.exp_max << c.mant_bits; // +Inf
+            if(c.has_inf_nan && p == c.nan_code)
+                return (c.exp_max << c.mant_bits) | 1; // NaN
+            const u64 width_mask = (c.bit_width >= 64) ? ~u64{0} : ((u64{1} << c.bit_width) - 1);
+            return p & width_mask;
+        }
+
         // ---- vector wrappers: apply the scalar core lane-wise (cf. ring_div) -----
         template <class Bits, class Op>
         FPSAN_HOST_DEVICE constexpr Bits alg_lanewise1(Bits a, Op op)
@@ -315,6 +330,11 @@ namespace fpsan
             return alg_lanewise1(raw, [&](u64 x) { return alg_embed1(c, x); });
         }
         template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_unembed(const AlgConfig& c, Bits p)
+        {
+            return alg_lanewise1(p, [&](u64 x) { return alg_unembed1(c, x); });
+        }
+        template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_add(const AlgConfig& c, Bits a, Bits b)
         {
             return alg_lanewise2(a, b, [&](u64 x, u64 y) { return alg_add1(c, x, y); });
@@ -343,6 +363,19 @@ namespace fpsan
         FPSAN_HOST_DEVICE constexpr Bits alg_exp(const AlgConfig& c, Bits a)
         {
             return alg_lanewise1(a, [&](u64 x) { return alg_exp1(c, x); });
+        }
+
+        // Op-tagged free generator for transcendentals with no honored identity
+        // (log, sqrt, and -- in this prototype -- exp2/sin/cos): deterministic,
+        // op-distinct, faithful to algebraic independence (Schanuel).
+        FPSAN_HOST_DEVICE constexpr u64 alg_tagged1(const AlgConfig& c, u64 a, u64 tag)
+        {
+            return alg_is_fin(c, a) ? alg_token(tag, a, c.n) : c.nan_code;
+        }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_tagged(const AlgConfig& c, Bits a, u64 tag)
+        {
+            return alg_lanewise1(a, [&](u64 x) { return alg_tagged1(c, x, tag); });
         }
 
     } // namespace detail
