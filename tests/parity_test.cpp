@@ -163,10 +163,10 @@ namespace
     }
 
 #define PARITY_ALL_MODES(FT, TAG)        \
-    PARITY_ONE(FT, TAG, Float, Implicit) \
-    PARITY_ONE(FT, TAG, Float, Explicit) \
-    PARITY_ONE(FT, TAG, FPSan, Implicit) \
-    PARITY_ONE(FT, TAG, FPSan, Explicit)
+    PARITY_ONE(FT, TAG, Native, Implicit) \
+    PARITY_ONE(FT, TAG, Native, Explicit) \
+    PARITY_ONE(FT, TAG, FPSanLikeTriton, Implicit) \
+    PARITY_ONE(FT, TAG, FPSanLikeTriton, Explicit)
 
 PARITY_ALL_MODES(float, F32)
 PARITY_ALL_MODES(double, F64)
