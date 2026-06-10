@@ -89,7 +89,8 @@ Note these variants promote `log`/`log2` to
 genuine homomorphisms (the exact inverses of `exp`/`exp2`), where the free
 `FPSanLikeTriton`/Triton model keeps them as tagged tokens. They flow through
 every intrinsic with no per-intrinsic changes. The math and trade-offs are in
-the `algebraic-fpsan.md` design notes (the bjacob/fpsan study).
+the [`docs/algebraic-fpsan.md`](docs/algebraic-fpsan.md) design notes (with
+background in [`docs/understanding-fpsan.md`](docs/understanding-fpsan.md)).
 
 ## Quick start
 

@@ -3,11 +3,11 @@
 This is a companion to [understanding-fpsan.md](understanding-fpsan.md), which
 builds the Triton floating-point sanitizer **FPSan** up from scratch. That note
 explains the problem and the design; this one explores a different choice at the
-heart of it. A complete implementation of everything here lives at
-[ROCm/hip-fpsan](https://github.com/ROCm/hip-fpsan), and a small standalone
-prototype sits next to this file:
-[`algebraic_fpsan_generic.hpp`](algebraic_fpsan_generic.hpp) +
-[`algebraic_demo.cpp`](algebraic_demo.cpp).
+heart of it. A complete implementation of everything here ships in this library:
+the payload algebra in
+[`include/fpsan/detail/algebraic.hpp`](../include/fpsan/detail/algebraic.hpp),
+wired into `Value<>` and exercised by
+[`tests/algebraic_value_test.cpp`](../tests/algebraic_value_test.cpp).
 
 ## The problem, in one paragraph
 
@@ -155,7 +155,7 @@ reducing mod a random prime). Two consequences:
   run — choosing `p` at random makes collisions **non-repeatable**: there is no
   bad pair that fools you every time.
 
-The prototype confirms the rate: over 300k random floats, observed leaf
+Measurement confirms the rate: over 300k random floats, observed leaf
 collisions track the birthday estimate to within noise.
 
 ## Why we can't scramble on top
@@ -253,8 +253,8 @@ whether we can *build* an `exp` with the right law `exp(a+b) == exp(a)*exp(b)`.
 `(F_p, +)` to `(F_p-nonzero, *)`, and because the additive group has size `p`
 while the multiplicative group has size `p-1` (coprime), the only such map is
 trivial. So a single-prime variant cannot honor the exponential law — its `exp`
-is a tagged hash token, and the prototype duly finds the law holding `0/50000`
-times. FPSan escapes this only because its ring `Z/2^w` has additive and
+is a tagged hash token, and the law duly holds `0/50000` times in measurement.
+FPSan escapes this only because its ring `Z/2^w` has additive and
 multiplicative structure that share the prime `2`.
 
 **As a function of a second, mod-`d` residue: yes.** Pick an element `g` of odd
@@ -264,8 +264,8 @@ depends on `v mod d`, not `v mod p`, so we have to *carry* `v mod d`.
 **The Chinese Remainder Theorem keeps that compact.** Carrying both `v mod p` and
 `v mod d` is the same as carrying `v mod n` for `n = p*d` — still one residue, one
 word. Choose `p ≡ 1 (mod d)` and `g` of order `d`; then `v mod d` reads straight
-off the single residue and `exp(v) = g^(v mod d)`. The prototype's composite
-variant honors `exp(a+b) == exp(a)*exp(b)` exactly (`50000/50000`). The cost (next
+off the single residue and `exp(v) = g^(v mod d)`. The composite
+variant honors `exp(a+b) == exp(a)*exp(b)` exactly (`50000/50000` in measurement). The cost (next
 section): a composite modulus has a few **zero-divisors**, and `exp`'s image is
 only the small order-`d` subgroup, so `exp` outputs collide more often.
 
@@ -403,11 +403,12 @@ introduces nilpotents, which are algebraically uglier and less value-faithful.)
 All variants share the **hybrid scheme**: carry `phi_n(exact value)` for
 `+ - * /`, the algebraic roots, and the multiplicative casts (honest `0`/`∞`/NaN);
 at a transcendental call, either apply the structured map (`exp` etc., where the
-variant supports it) or mint a fresh hash token. The prototype
-[`algebraic_fpsan_generic.hpp`](algebraic_fpsan_generic.hpp) +
-[`algebraic_demo.cpp`](algebraic_demo.cpp) implements all three and checks the
-homomorphism, ring-law, infinity/NaN, and exp/log/trig properties, reporting the
-collision and zero-divisor rates quoted above.
+variant supports it) or mint a fresh hash token. The implementation in
+[`include/fpsan/detail/algebraic.hpp`](../include/fpsan/detail/algebraic.hpp)
+provides all three variants (each with an independent-prime twin), and
+[`tests/algebraic_value_test.cpp`](../tests/algebraic_value_test.cpp) checks the
+homomorphism, ring-law, infinity/NaN, and exp/log/trig properties across every
+variant and width; the collision and zero-divisor rates match those quoted above.
 
 **The one genuinely open limitation is order** — `min`, `max`, `abs`,
 comparisons. No finite ring has a compatible total order, and no sign or exponent
@@ -436,7 +437,7 @@ fingerprint**: two runs that should agree get identical fingerprints, and a
 mismatch pinpoints where the numerics diverged. Reassociation-invariance is just
 associativity plus commutativity (below); the variants differ in which *further*
 identities the fingerprint keeps. The Triton column was read from Triton's
-`FpSanitizer.cpp`; the rest from the prototype.
+`FpSanitizer.cpp`; the rest from the implementation in this repository.
 
 Columns: **Triton** = `FPSanLikeTriton` (the free model) · **Field** =
 `FPSanAlgebraicField` · **Sophie Germain** = `FPSanAlgebraicRingSophieGermain` ·
