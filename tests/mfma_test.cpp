@@ -31,6 +31,7 @@
 #include "fpsan/amdgcn_smfmac.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -140,19 +141,19 @@ __global__ void k_builtin(const typename Harness<Traits>::AElem* A,
 }
 
 // FPSan-mode kernel: writes per-element FPSan payloads through output_loc_32.
-template <class Traits>
+template <class Traits, Semantics S>
 __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
                         const typename Harness<Traits>::BElem* B,
                         const typename Harness<Traits>::CElem* C,
                         typename Harness<Traits>::CBits*       Dpay)
 {
-    using H                                             = Harness<Traits>;
-    int                                            lane = threadIdx.x;
-    Value<typename H::AVec, Semantics::FPSanLikeTriton, kCC> a;
-    Value<typename H::BVec, Semantics::FPSanLikeTriton, kCC> b;
-    Value<typename H::CVec, Semantics::FPSanLikeTriton, kCC> c;
-    load_frags<Traits, Semantics::FPSanLikeTriton>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::FPSanLikeTriton, kCC>(a, b, c);
+    using H                                = Harness<Traits>;
+    int                            lane    = threadIdx.x;
+    Value<typename H::AVec, S, kCC> a;
+    Value<typename H::BVec, S, kCC> b;
+    Value<typename H::CVec, S, kCC> c;
+    load_frags<Traits, S>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<S, kCC>(a, b, c);
     for(int i = 0; i < H::M; ++i)
         for(int j = 0; j < H::N; ++j)
         {
@@ -234,8 +235,9 @@ void run_layout_matches_hardware()
     (void)hipFree(dD);
 }
 
-// (2) Payload test: shipped FPSan dataflow vs host scalar FPSan reference.
-template <class Traits>
+// (2) Payload test: shipped FPSan dataflow vs host scalar FPSan reference, in one
+// semantics S (self-consistency); looped over all FPSan-family semantics below.
+template <class Traits, Semantics S>
 void run_fpsan_matches_scalar_reference()
 {
     using H     = Harness<Traits>;
@@ -243,14 +245,11 @@ void run_fpsan_matches_scalar_reference()
     using BE    = typename H::BElem;
     using CE    = typename H::CElem;
     using CBits = typename H::CBits;
-    int ndev    = 0;
-    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
-        GTEST_SKIP() << "no HIP device";
     Mats<Traits> m = make_inputs<Traits>();
 
-    using VA = Value<AE, Semantics::FPSanLikeTriton, kCC>;
-    using VB = Value<BE, Semantics::FPSanLikeTriton, kCC>;
-    using VC = Value<CE, Semantics::FPSanLikeTriton, kCC>;
+    using VA = Value<AE, S, kCC>;
+    using VB = Value<BE, S, kCC>;
+    using VC = Value<CE, S, kCC>;
     std::vector<CBits> ref(H::M * H::N);
     for(int i = 0; i < H::M; ++i)
         for(int j = 0; j < H::N; ++j)
@@ -268,7 +267,7 @@ void run_fpsan_matches_scalar_reference()
     CE*    dC = to_dev(m.C);
     CBits* dD;
     HIP_CHECK(hipMalloc(&dD, H::M * H::N * sizeof(CBits)));
-    k_fpsan<Traits><<<1, WAVE>>>(dA, dB, dC, dD);
+    k_fpsan<Traits, S><<<1, WAVE>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<CBits> got(H::M * H::N);
     HIP_CHECK(hipMemcpy(got.data(), dD, H::M * H::N * sizeof(CBits), hipMemcpyDeviceToHost));
@@ -278,6 +277,16 @@ void run_fpsan_matches_scalar_reference()
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dD);
+}
+
+// Run the payload test for every FPSan-family semantics (Triton + all algebraic).
+template <class Traits>
+void run_fpsan_matches_scalar_reference_all()
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    fpsan_test::for_each_fpsan_semantics(
+        [](auto sem) { run_fpsan_matches_scalar_reference<Traits, decltype(sem)::value>(); });
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +307,7 @@ using fpsan::v8h_native;
     }                                               \
     TEST(Name, FpsanMatchesScalarReference)         \
     {                                               \
-        run_fpsan_matches_scalar_reference<Name>(); \
+        run_fpsan_matches_scalar_reference_all<Name>(); \
     }
 
 // ---- F16 / BF16 inputs, F32 accumulator -----------------------------------
@@ -580,31 +589,34 @@ TEST(MfmaF64_16x16x4, FpsanMatchesScalarReference)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    F64Mats m = make_f64_inputs();
-    using VD  = Value<double, Semantics::FPSanLikeTriton, kCC>;
-    std::vector<std::uint64_t> ref(F64_M * F64_N);
-    for(int i = 0; i < F64_M; ++i)
-        for(int j = 0; j < F64_N; ++j)
-        {
-            VD acc(m.C[i * F64_N + j]);
-            for(int k = 0; k < F64_K; ++k)
-                acc = acc + VD(m.A[i * F64_K + k]) * VD(m.B[k * F64_N + j]);
-            ref[i * F64_N + j] = acc.fpsan_payload();
-        }
-    double *       dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
-    std::uint64_t* dD;
-    HIP_CHECK(hipMalloc(&dD, F64_M * F64_N * sizeof(std::uint64_t)));
-    k_mfma_f64_16x16x4<Semantics::FPSanLikeTriton, std::uint64_t><<<1, WAVE>>>(dA, dB, dC, dD);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<std::uint64_t> got(F64_M * F64_N);
-    HIP_CHECK(
-        hipMemcpy(got.data(), dD, F64_M * F64_N * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
-    for(int i = 0; i < F64_M * F64_N; ++i)
-        EXPECT_EQ(got[i], ref[i]) << "payload mismatch at " << (i / F64_N) << "," << (i % F64_N);
+    F64Mats m  = make_f64_inputs();
+    double *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VD              = Value<double, S, kCC>;
+        std::vector<std::uint64_t> ref(F64_M * F64_N);
+        for(int i = 0; i < F64_M; ++i)
+            for(int j = 0; j < F64_N; ++j)
+            {
+                VD acc(m.C[i * F64_N + j]);
+                for(int k = 0; k < F64_K; ++k)
+                    acc = acc + VD(m.A[i * F64_K + k]) * VD(m.B[k * F64_N + j]);
+                ref[i * F64_N + j] = acc.fpsan_payload();
+            }
+        std::uint64_t* dD;
+        HIP_CHECK(hipMalloc(&dD, F64_M * F64_N * sizeof(std::uint64_t)));
+        k_mfma_f64_16x16x4<S, std::uint64_t><<<1, WAVE>>>(dA, dB, dC, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<std::uint64_t> got(F64_M * F64_N);
+        HIP_CHECK(
+            hipMemcpy(got.data(), dD, F64_M * F64_N * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
+        for(int i = 0; i < F64_M * F64_N; ++i)
+            EXPECT_EQ(got[i], ref[i]) << "payload mismatch at " << (i / F64_N) << "," << (i % F64_N);
+        (void)hipFree(dD);
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
-    (void)hipFree(dD);
 }
 
 // ---------------------------------------------------------------------------
