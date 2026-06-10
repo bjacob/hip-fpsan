@@ -14,6 +14,8 @@
 using namespace fpsan;
 template <Semantics S>
 using F = Value<float, S, Conversions::Explicit>;
+template <Semantics S>
+using D = Value<double, S, Conversions::Explicit>;
 
 static long pass = 0, fail = 0;
 static void check(bool ok, const char* msg)
@@ -33,10 +35,273 @@ static V mac(const float* a, const float* b, int n, const int* order)
     return acc;
 }
 
+static void checkf(bool ok, const char* tag, const char* what)
+{
+    char buf[192];
+    std::snprintf(buf, sizeof buf, "%s: %s", tag, what);
+    check(ok, buf);
+}
+
+// ===========================================================================
+// Scorecard batteries: one function per scorecard SECTION, run for EVERY
+// applicable variant so no row can silently regress. (See algebraic-fpsan.md.)
+// ===========================================================================
+
+// "ring axioms and exact value relations" -- hold in every algebraic value model
+// (the leaf encoding is itself a ring homomorphism, so identities of the exact
+// values hold of the fingerprints). Use small dyadic rationals -- all units.
+template <class V>
+static void battery_ring(const char* tag)
+{
+    checkf(V{0.0f} + V{2.5f} == V{2.5f}, tag, "0+x == x");
+    checkf(V{1.0f} * V{2.5f} == V{2.5f}, tag, "1*x == x");
+    checkf(V{2.5f} - V{2.5f} == V{0.0f}, tag, "x-x == 0");
+    checkf(V{2.0f} + V{2.0f} == V{4.0f}, tag, "constant fold 2+2 == 4");
+    checkf(V{2.0f} * V{3.0f} == V{6.0f}, tag, "constant fold 2*3 == 6");
+    checkf(V{0.5f} + V{0.5f} == V{1.0f}, tag, "constant fold 0.5+0.5 == 1");
+    checkf(V{1.5f} + V{1.5f} == V{2.0f} * V{1.5f}, tag, "symbolic x+x == 2x");
+    {
+        V a{2.5f};
+        checkf((a + V{1.0f}) * (a - V{1.0f}) == a * a - V{1.0f}, tag, "symbolic (x+1)(x-1)==x^2-1");
+    }
+    {
+        V a{2.0f}, b{3.0f};
+        checkf((a + b) * (a + b) == a * a + V{2.0f} * a * b + b * b, tag,
+               "symbolic (a+b)^2 == a^2+2ab+b^2");
+    }
+    checkf(V{1.1f} + V{2.2f} == V{2.2f} + V{1.1f}, tag, "commutativity");
+    checkf((V{1.1f} + V{2.2f}) + V{3.3f} == V{1.1f} + (V{2.2f} + V{3.3f}), tag, "associativity");
+    {
+        V a{2.5f}, b{1.25f}, c{0.5f};
+        checkf(a * (b + c) == a * b + a * c, tag, "distributivity");
+    }
+}
+
+// "division & field structure". For a field, division is total; for the composite
+// rings it holds on units -- the small integers below are units (huge primes).
+template <class V>
+static void battery_division(const char* tag)
+{
+    long xx = 0, abb = 0, n = 0;
+    for(int i = 1; i <= 50; ++i)
+        for(int j = 1; j <= 7; ++j, ++n)
+        {
+            V a{(float)i}, b{(float)j};
+            xx += (a / a == V{1.0f});
+            abb += ((a / b) * b == a);
+        }
+    checkf(xx == n, tag, "x/x == 1 (on units)");
+    checkf(abb == n, tag, "(a/b)*b == a (b a unit)");
+}
+
+// "infinity & NaN" -- the projective extension, identical across all variants.
+template <class V>
+static void battery_infnan(const char* tag)
+{
+    const V inf = V{1.0f} / V{0.0f};
+    const V nan = V{0.0f} / V{0.0f};
+    checkf(inf == V{2.0f} / V{0.0f}, tag, "1/0 is a single unsigned inf");
+    checkf(V{1.0f} / inf == V{0.0f}, tag, "1/inf == 0");
+    checkf(V{3.0f} + inf == inf, tag, "x + inf == inf");
+    checkf(V{3.0f} * inf == inf, tag, "x * inf == inf");
+    checkf(inf + inf == nan, tag, "inf +- inf -> NaN");
+    checkf(inf - inf == nan, tag, "inf - inf -> NaN");
+    checkf(V{0.0f} * inf == nan, tag, "0 * inf -> NaN");
+    checkf(inf / inf == nan, tag, "inf / inf -> NaN");
+    checkf(nan == nan, tag, "NaN deterministic (compares equal to itself)");
+    checkf(nan + V{1.0f} == nan, tag, "NaN absorbing under +");
+    checkf(nan * V{2.0f} == nan, tag, "NaN absorbing under *");
+}
+
+// "algebraic functions: roots". sqrt/rsqrt are multiplicative power maps in every
+// variant; cbrt is a perfect cube root where 3 is coprime to the group order
+// (Field/SophieGermain) and a token otherwise (Pythagorean).
+template <class V>
+static void battery_roots(const char* tag, bool has_cbrt)
+{
+    checkf(V::alg_cfg().has_cbrt == has_cbrt, tag, "has_cbrt matches the variant");
+    long ms = 0, rinv = 0, rcons = 0, sq = 0, n = 0;
+    float xs[] = {1.f, 2.f, 3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f,
+                  0.5f, 1.5f, 6.f, 0.25f, 0.75f, 10.f};
+    for(float u : xs)
+    {
+        V a{u};
+        rinv += (rsqrt(a) * sqrt(a) == V{1.0f});
+        rcons += (rsqrt(a) == V{1.0f} / sqrt(a));
+        for(float v : xs)
+        {
+            V b{v};
+            ms += (sqrt(a * b) == sqrt(a) * sqrt(b)); // multiplicative: universal
+            sq += (sqrt(a) * sqrt(a) == a);           // round-trip: square residues only
+            ++n;
+        }
+    }
+    checkf(ms == n, tag, "sqrt(x*y) == sqrt(x)*sqrt(y) (multiplicative)");
+    // sqrt(x)^2 == x holds on the square residues only -- a proper, nonempty subset
+    // (1 is always a square, not every value is). Field ~1/2, SG ~1/4, Pyth ~1/8.
+    checkf(sq > 0 && sq < n, tag, "sqrt(x)^2 == x on the square residues (not all)");
+    checkf(rinv == (long)(sizeof xs / sizeof *xs), tag, "rsqrt(x)*sqrt(x) == 1");
+    checkf(rcons == (long)(sizeof xs / sizeof *xs), tag, "rsqrt == 1/sqrt");
+    if(has_cbrt)
+    {
+        long mc = 0, c3 = 0;
+        for(float u : xs)
+            for(float v : xs)
+            {
+                V a{u}, b{v};
+                mc += (cbrt(a * b) == cbrt(a) * cbrt(b));
+                c3 += (cbrt(a) * cbrt(a) * cbrt(a) == a);
+            }
+        checkf(mc == n, tag, "cbrt(x*y) == cbrt(x)*cbrt(y)");
+        checkf(c3 == n, tag, "cbrt(x)^3 == x (perfect)");
+    }
+    else
+    {
+        checkf(cbrt(V{7.0f}) == cbrt(V{7.0f}), tag, "cbrt deterministic (token)");
+        checkf(cbrt(V{2.0f} * V{3.0f}) != cbrt(V{2.0f}) * cbrt(V{3.0f}), tag,
+               "cbrt NOT multiplicative (token)");
+    }
+}
+
+// "transcendental functions". two_moduli (SophieGermain/Pythagorean): exp/exp2/
+// exp10 and their log inverses are genuine homomorphisms; otherwise (Field) every
+// one is a tagged token (no homomorphism).
+template <class V>
+static void battery_transcendental(const char* tag, bool two_moduli)
+{
+    float as[] = {0.5f, 1.0f, 1.5f, 2.0f, -1.0f, 0.25f, 3.0f};
+    float ms[] = {1.0f, 2.0f, 3.0f, 5.0f, 0.5f, 1.5f, 7.0f};
+    long  e = 0, e2 = 0, e10 = 0, l = 0, l2 = 0, l10 = 0, invc = 0, na = 0, nm = 0;
+    for(float u : as)
+        for(float v : as)
+        {
+            V a{u}, b{v};
+            e += (exp(a + b) == exp(a) * exp(b));
+            e2 += (exp2(a + b) == exp2(a) * exp2(b));
+            e10 += (exp10(a + b) == exp10(a) * exp10(b));
+            ++na;
+        }
+    for(float u : ms)
+        for(float v : ms)
+        {
+            V a{u}, b{v};
+            l += (log(a * b) == log(a) + log(b));
+            l2 += (log2(a * b) == log2(a) + log2(b));
+            l10 += (log10(a * b) == log10(a) + log10(b));
+            invc += (exp(log(exp(a))) == exp(a));
+            ++nm;
+        }
+    if(two_moduli)
+    {
+        checkf(e == na, tag, "exp(a+b) == exp(a)*exp(b)");
+        checkf(e2 == na, tag, "exp2(a+b) == exp2(a)*exp2(b)");
+        checkf(e10 == na, tag, "exp10(a+b) == exp10(a)*exp10(b)");
+        checkf(l == nm, tag, "log(x*y) == log(x)+log(y)");
+        checkf(l2 == nm, tag, "log2(x*y) == log2(x)+log2(y)");
+        checkf(l10 == nm, tag, "log10(x*y) == log10(x)+log10(y)");
+        checkf(invc == nm, tag, "exp(log(exp v)) == exp v");
+        checkf(exp2(V{2.0f}) != exp(V{2.0f}) && exp10(V{2.0f}) != exp(V{2.0f})
+                   && exp10(V{2.0f}) != exp2(V{2.0f}),
+               tag, "exp/exp2/exp10 are distinct bases");
+    }
+    else
+    {
+        // Field (and any non-two-moduli): every exp/log base is a tagged token.
+        checkf(e < na && e2 < na && e10 < na, tag, "exp/exp2/exp10 NOT homomorphisms (token)");
+        checkf(l < nm && l2 < nm && l10 < nm, tag, "log/log2/log10 NOT homomorphisms (token)");
+    }
+}
+
+// "sin/cos". has_trig (Pythagorean): genuine angle-addition + cos^2+sin^2==1;
+// otherwise sin/cos are tagged tokens (angle-addition fails).
+template <class V>
+static void battery_trig(const char* tag, bool has_trig)
+{
+    float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, -1.0f, 0.25f};
+    long  ok = 0, n = 0;
+    for(float u : xs)
+        for(float v : xs)
+        {
+            V a{u}, b{v};
+            bool c1 = (cos(a + b) == cos(a) * cos(b) - sin(a) * sin(b));
+            bool c2 = (sin(a + b) == sin(a) * cos(b) + cos(a) * sin(b));
+            ok += (c1 && c2);
+            ++n;
+        }
+    if(has_trig)
+    {
+        checkf(cos(V{0.0f}) == V{1.0f} && sin(V{0.0f}) == V{0.0f}, tag, "cos(0)==1, sin(0)==0");
+        checkf(ok == n, tag, "sin/cos angle-addition");
+        checkf(cos(V{1.3f}) * cos(V{1.3f}) + sin(V{1.3f}) * sin(V{1.3f}) == V{1.0f}, tag,
+               "cos^2 + sin^2 == 1");
+    }
+    else
+    {
+        checkf(ok < n, tag, "sin/cos are tokens (no angle-addition)");
+    }
+}
+
+// "miscellaneous": min/max/comparisons do NOT follow the IEEE numeric order
+// (scorecard ❌, shared by all incl. Triton), but they are deterministic,
+// commutative, and reassociation-invariant -- the sanitizer property that must
+// not regress.
+template <class V>
+static void battery_misc(const char* tag)
+{
+    checkf(min(V{1.0f}, V{2.0f}) == min(V{2.0f}, V{1.0f}), tag, "min commutes");
+    checkf(max(V{1.0f}, V{2.0f}) == max(V{2.0f}, V{1.0f}), tag, "max commutes");
+    checkf(max(min(V{3.0f}, V{1.0f}), V{2.0f}) == max(V{2.0f}, min(V{1.0f}, V{3.0f})), tag,
+           "min/max reassociation-invariant");
+}
+
+// Run the whole scorecard over one variant (T = a Value<...> type).
+template <class Fld, class SG, class Py>
+static void run_scorecard(const char* fld_tag, const char* sg_tag, const char* py_tag)
+{
+    battery_misc<Fld>(fld_tag); battery_misc<SG>(sg_tag); battery_misc<Py>(py_tag);
+    battery_ring<Fld>(fld_tag);    battery_ring<SG>(sg_tag);    battery_ring<Py>(py_tag);
+    battery_division<Fld>(fld_tag); battery_division<SG>(sg_tag); battery_division<Py>(py_tag);
+    battery_infnan<Fld>(fld_tag);  battery_infnan<SG>(sg_tag);  battery_infnan<Py>(py_tag);
+    battery_roots<Fld>(fld_tag, true);  battery_roots<SG>(sg_tag, true);  battery_roots<Py>(py_tag, false);
+    battery_transcendental<Fld>(fld_tag, false); battery_transcendental<SG>(sg_tag, true);
+    battery_transcendental<Py>(py_tag, true);
+    battery_trig<Fld>(fld_tag, false); battery_trig<SG>(sg_tag, false); battery_trig<Py>(py_tag, true);
+}
+
 int main()
 {
     using Alg   = F<Semantics::FPSanAlgebraicField>;
     using Scr   = F<Semantics::FPSanLikeTriton>; // Triton-style free model
+
+    // ---- systematic scorecard coverage: every section x every variant --------
+    // (float width). The "2" twins run the same batteries to lock in that an
+    // independent prime gives the same algebra. Double is covered below.
+    run_scorecard<F<Semantics::FPSanAlgebraicField>, F<Semantics::FPSanAlgebraicRingSophieGermain>,
+                  F<Semantics::FPSanAlgebraicRingPythagorean>>("field", "SophieGermain", "Pythagorean");
+    run_scorecard<F<Semantics::FPSanAlgebraicField2>, F<Semantics::FPSanAlgebraicRingSophieGermain2>,
+                  F<Semantics::FPSanAlgebraicRingPythagorean2>>("field2", "SophieGermain2",
+                                                                "Pythagorean2");
+    {
+        // Triton free-model contrast: the value-faithful rows FAIL (the encoding
+        // is a non-homomorphic scramble), while the pure ring identities still hold.
+        checkf(Scr{2.0f} + Scr{2.0f} != Scr{4.0f}, "triton", "2+2 != 4 (no value fidelity)");
+        checkf(Scr{2.0f} * Scr{3.0f} != Scr{6.0f}, "triton", "2*3 != 6");
+        checkf(Scr{1.5f} + Scr{1.5f} != Scr{2.0f} * Scr{1.5f}, "triton", "x+x != 2x");
+        Scr a{1.1f}, b{2.2f}, c{0.5f};
+        checkf(a * (b + c) == a * b + a * c, "triton", "distributivity still holds (ring identity)");
+        checkf((a + b) + c == a + (b + c), "triton", "associativity still holds");
+    }
+    // "collisions re-rollable": a fresh prime (the "2" twin) gives independent
+    // blind spots -- the same value maps to a different residue under each.
+    checkf(F<Semantics::FPSanAlgebraicField>{0.5f}.fpsan_payload()
+               != F<Semantics::FPSanAlgebraicField2>{0.5f}.fpsan_payload(),
+           "re-rollable", "field vs field2 distinct moduli");
+    checkf(F<Semantics::FPSanAlgebraicRingSophieGermain>{0.5f}.fpsan_payload()
+               != F<Semantics::FPSanAlgebraicRingSophieGermain2>{0.5f}.fpsan_payload(),
+           "re-rollable", "SophieGermain vs twin distinct moduli");
+    checkf(F<Semantics::FPSanAlgebraicRingPythagorean>{0.5f}.fpsan_payload()
+               != F<Semantics::FPSanAlgebraicRingPythagorean2>{0.5f}.fpsan_payload(),
+           "re-rollable", "Pythagorean vs twin distinct moduli");
 
     // ---- algebraic = value model: rational identities hold within a width ----
     check((Alg{2.0f} + Alg{2.0f}) == Alg{4.0f}, "alg: 2+2 == 4");
@@ -365,75 +630,19 @@ int main()
         check(h1 == h2, "alg: cross-width cast is deterministic");
     }
 
-    // ---- 64-bit element types (double): the full algebra at n ~ 2^64 ----------
-    // Exercises the 128-bit modular multiply, the overflow-safe modular add, the
-    // overflow-free cbrt exponent, and -- for log/log2/log10 on the d ~ 2^31
-    // channel -- the Pollard-rho discrete log.
-    {
-        using DFld = Value<double, Semantics::FPSanAlgebraicField, Conversions::Explicit>;
-        check((DFld{2.0} + DFld{2.0}) == DFld{4.0}, "dbl field: 2+2 == 4");
-        check((DFld{3.0} * DFld{3.0}) == DFld{9.0}, "dbl field: 3*3 == 9");
-        {
-            long ok = 0, n = 0;
-            for(int i = 1; i <= 400; ++i, ++n)
-                ok += ((DFld{(double)i} / DFld{(double)i}) == DFld{1.0});
-            check(ok == n, "dbl field: x/x == 1");
-        }
-        check(sqrt(DFld{3.0} * DFld{5.0}) == sqrt(DFld{3.0}) * sqrt(DFld{5.0}),
-              "dbl field: sqrt(x*y) == sqrt(x)*sqrt(y)");
-        {
-            DFld x{7.0}, c = cbrt(x);
-            check(c * c * c == x, "dbl field: cbrt(x)^3 == x (perfect)");
-        }
-
-        using DExp = Value<double, Semantics::FPSanAlgebraicRingSophieGermain, Conversions::Explicit>;
-        check(exp(DExp{0.0}) == DExp{1.0}, "dbl SG: exp(0) == 1");
-        {
-            long  ok = 0, n = 0;
-            double xs[] = {0.5, 1.0, 1.5, 2.0, -1.0, 0.25, 3.0};
-            for(double u : xs)
-                for(double v : xs) { ok += (exp(DExp{u} + DExp{v}) == exp(DExp{u}) * exp(DExp{v})); ++n; }
-            check(ok == n, "dbl SG: exp(a+b) == exp(a)*exp(b)");
-        }
-        {
-            long  ok = 0, n = 0;
-            double xs[] = {1.0, 2.0, 3.0, 5.0, 0.5, 1.5, 7.0};
-            for(double u : xs)
-                for(double v : xs) { ok += (log(DExp{u} * DExp{v}) == log(DExp{u}) + log(DExp{v})); ++n; }
-            check(ok == n, "dbl SG: log(x*y) == log(x)+log(y) (Pollard-rho dlog)");
-        }
-        check(exp(log(exp(DExp{1.5}))) == exp(DExp{1.5}), "dbl SG: exp(log(exp v)) == exp v");
-        check(exp2(DExp{2.0}) != exp(DExp{2.0}), "dbl SG: exp2 != exp (distinct base)");
-        check(exp10(log10(exp10(DExp{1.5}))) == exp10(DExp{1.5}), "dbl SG: exp10(log10(exp10 v))");
-
-        using DTrig = Value<double, Semantics::FPSanAlgebraicRingPythagorean, Conversions::Explicit>;
-        check(cos(DTrig{0.0}) == DTrig{1.0}, "dbl Pyth: cos(0) == 1");
-        check(sin(DTrig{0.0}) == DTrig{0.0}, "dbl Pyth: sin(0) == 0");
-        {
-            long  ok = 0, n = 0;
-            double xs[] = {0.5, 1.0, 1.5, 2.0, 3.0, -1.0, 0.25};
-            for(double u : xs)
-                for(double v : xs)
-                {
-                    bool c1 = (cos(DTrig{u} + DTrig{v})
-                               == cos(DTrig{u}) * cos(DTrig{v}) - sin(DTrig{u}) * sin(DTrig{v}));
-                    bool c2 = (sin(DTrig{u} + DTrig{v})
-                               == sin(DTrig{u}) * cos(DTrig{v}) + cos(DTrig{u}) * sin(DTrig{v}));
-                    ok += (c1 && c2);
-                    ++n;
-                }
-            check(ok == n, "dbl Pyth: sin/cos angle-addition");
-        }
-        check(cos(DTrig{1.3}) * cos(DTrig{1.3}) + sin(DTrig{1.3}) * sin(DTrig{1.3}) == DTrig{1.0},
-              "dbl Pyth: cos^2 + sin^2 == 1");
-        check(log(DTrig{2.0} * DTrig{3.0}) == log(DTrig{2.0}) + log(DTrig{3.0}),
-              "dbl Pyth: log homomorphism still holds");
-        // independent-prime twins also work at 64 bits
-        using DFld2 = Value<double, Semantics::FPSanAlgebraicField2, Conversions::Explicit>;
-        check((DFld2{2.0} + DFld2{2.0}) == DFld2{4.0}, "dbl field2: 2+2 == 4");
-        check(DFld{0.5}.fpsan_payload() != DFld2{0.5}.fpsan_payload(),
-              "dbl field/field2 use distinct moduli");
-    }
+    // ---- 64-bit element types (double): the same scorecard, every section -----
+    // Runs the full battery set at n ~ 2^64, exercising the 128-bit modular
+    // multiply, the overflow-safe modular add, the overflow-free cbrt exponent,
+    // and -- for log/log2/log10 on the d ~ 2^31 channel -- the Pollard-rho dlog.
+    run_scorecard<D<Semantics::FPSanAlgebraicField>, D<Semantics::FPSanAlgebraicRingSophieGermain>,
+                  D<Semantics::FPSanAlgebraicRingPythagorean>>("dbl field", "dbl SophieGermain",
+                                                               "dbl Pythagorean");
+    run_scorecard<D<Semantics::FPSanAlgebraicField2>, D<Semantics::FPSanAlgebraicRingSophieGermain2>,
+                  D<Semantics::FPSanAlgebraicRingPythagorean2>>("dbl field2", "dbl SophieGermain2",
+                                                                "dbl Pythagorean2");
+    check(D<Semantics::FPSanAlgebraicField>{0.5}.fpsan_payload()
+              != D<Semantics::FPSanAlgebraicField2>{0.5}.fpsan_payload(),
+          "dbl field/field2 use distinct moduli");
 
     std::printf("passed %ld, failed %ld\n", pass, fail);
     return fail == 0 ? 0 : 1;
