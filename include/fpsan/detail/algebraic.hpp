@@ -82,11 +82,11 @@ namespace fpsan
         // (see alg_cast1). Variant 1 and 2 are two independent towers sharing only
         // fp4 = 11 (the only 11-mod-12 prime that fits 4 bits). Exp pairs are
         // Sophie Germain (p = 2d+1); g has order d in (Z/n)^*.  64-bit (double) is
-        // supported via 128-bit modular multiply (alg_mulmod); its Field prime sits
-        // just below 2^64 but is OFF the cast tower (like fp6) -- a multiplicative
-        // double<->narrow cast would need a discrete log over the ~2^32-order fp32
-        // unit group, disproportionate for a non-hot-path; double casts use the
-        // plain reduce-mod convention. All other invariants hold at 64 bits.
+        // IN the tower: p_64 = (p_32-1)*c + 1 with c coprime to p_32-1, so its casts
+        // are multiplicative like the rest. The fp32<->fp64 cast dlog runs over
+        // p_32-1 ~ 2^32 -- infeasible by the O(m) scan, so alg_dlog_base switches to
+        // Pohlig-Hellman there (p_32-1 is smooth by construction). 128-bit modular
+        // multiply (alg_mulmod) carries the n ~ 2^64 arithmetic.
         FPSAN_HOST_DEVICE constexpr u64 alg_field_prime(AlgVariant v, unsigned w)
         {
             const bool a = (v == AlgVariant::Field1 || v == AlgVariant::Exp1
@@ -98,9 +98,10 @@ namespace fpsan
             case 8: return a ? 191u : 131u;
             case 16: return a ? 65171u : 64871u;
             case 32: return a ? 4284862331u : 4291215371u;
-            // 64-bit: largest 11-mod-12 primes below 2^64 (off the cast tower).
+            // 64-bit: 11-mod-12 primes in the cast tower (p_32-1 | p_64-1, cofactor
+            // coprime to p_32-1), just below 2^64.
             case 64:
-                return a ? 18446744073709551359ull : 18446744073709551263ull;
+                return a ? 18446743887391934171ull : 18446743217995397111ull;
             default: return 0;
             }
         }
@@ -118,7 +119,7 @@ namespace fpsan
             case 8: return a ? 19u : 2u; // 191 -> 19, 131 -> 2
             case 16: return a ? 2u : 7u; // 65171 -> 2, 64871 -> 7
             case 32: return 2u;          // 4284862331 -> 2, 4291215371 -> 2
-            case 64: return a ? 7u : 5u; // primitive roots of the two 64-bit primes
+            case 64: return a ? 2u : 7u; // primitive roots of the two 64-bit primes
             default: return 0;
             }
         }
@@ -607,12 +608,61 @@ namespace fpsan
             return acc;
         }
 
+        // Pohlig-Hellman discrete log for a SMOOTH group order m: find k in [0,m)
+        // with b^k == x in F_q, where b has order m. m is factored by trial division
+        // at runtime -- cheap because the Field primes are chosen so p-1 is smooth
+        // (largest prime factor a few thousand), so the loop terminates there. Used
+        // for the fp32<->fp64 cast, where m = p_32-1 ~ 2^32 makes the O(m) scan
+        // hopeless; returns the same unique k the scan would. The per-prime-power
+        // work is digit-by-digit (order-p subgroup dlogs by brute scan, p small)
+        // then CRT-combined; O(sum of prime factors), O(1) memory, device-friendly.
+        FPSAN_HOST_DEVICE constexpr u64 alg_dlog_ph(u64 x, u64 b, u64 m, u64 q)
+        {
+            u64 k = 0, M = 1, rem = m;
+            for(u64 d = 2; rem > 1; ++d)
+            {
+                if(d * d > rem)
+                    d = rem; // the remaining cofactor is prime
+                if(rem % d != 0)
+                    continue;
+                u64 e = 0, pe = 1;
+                while(rem % d == 0) { rem /= d; pe *= d; ++e; }
+                const u64 cof   = m / pe;
+                const u64 gi    = alg_powmod(b, cof, q);      // order pe
+                const u64 hi    = alg_powmod(x, cof, q);      // in <gi>
+                const u64 giinv = alg_inv(gi, q);
+                const u64 gamma = alg_powmod(gi, pe / d, q);  // order d (prime)
+                u64       ki = 0, pj = 1;
+                for(u64 j = 0; j < e; ++j)
+                {
+                    const u64 t  = alg_mulmod(alg_powmod(giinv, ki, q), hi, q);
+                    const u64 hj = alg_powmod(t, pe / (pj * d), q); // order | d
+                    u64       dj = 0, cur = 1 % q;
+                    for(u64 s = 0; s < d; ++s)
+                    {
+                        if(cur == hj) { dj = s; break; }
+                        cur = alg_mulmod(cur, gamma, q);
+                    }
+                    ki += dj * pj;
+                    pj *= d;
+                }
+                // CRT-combine (k mod M) with (ki mod pe); M, pe coprime.
+                const u64 inv  = alg_inv(M % pe, pe);
+                const u64 diff = (ki + pe - k % pe) % pe;
+                k += M * alg_mulmod(diff, inv, pe);
+                M *= pe;
+            }
+            return k % m;
+        }
+
         // Discrete log in F_q of x to base b, where b has order m (the answer is in
-        // [0, m)). Brute force, O(m) -- cheap when m is the SMALL prime's group order
-        // (fp4/fp8: <= ~190; the fp16<->fp32 edge pays O(2^16), tolerable for a
-        // sanitizer, and is the only place a BSGS upgrade would help).
+        // [0, m)). Brute force O(m) for the small group orders (fp4/fp8: <= ~190;
+        // the fp16<->fp32 edge pays O(2^16), tolerable); Pohlig-Hellman once m is
+        // large (the fp32<->fp64 cast, m = p_32-1 ~ 2^32). Same unique result.
         FPSAN_HOST_DEVICE constexpr u64 alg_dlog_base(u64 x, u64 b, u64 m, u64 q)
         {
+            if(m > (u64{1} << 20))
+                return alg_dlog_ph(x, b, m, q);
             u64 cur = 1 % q;
             for(u64 k = 0; k < m; ++k)
             {

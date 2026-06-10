@@ -561,15 +561,15 @@ are exactly the structured (non-token) realizations it has.
 model and isn't the goal here (these are fingerprints, not values): it would have
 to commute with both `+` and `×`, i.e. be a ring hom between fields of different
 characteristic. What the `FPSanAlgebraicField` coprime tower buys instead is that its
-in-chain casts (`fp4`/`fp8`/`fp16`/`fp32`) are multiplicative homomorphisms in
+in-chain casts (`fp4`/`fp8`/`fp16`/`fp32`/`fp64`) are multiplicative homomorphisms in
 both directions and form a commutative diagram: `cast<T>(x·y) == cast<T>(x)·cast<T>(y)`
 and `cast<T>(cast<U>(x)) == cast<T>(x)` (so up-then-down round trips,
-`narrow(widen(x)) == x`). `fp6` is off the chain, and so is `fp64` (`double`): a
-multiplicative `double`↔narrow cast would need a discrete log over the ~2^32-order
-`fp32` unit group, disproportionate for a type that isn't a matmul-storage hot
-path, so `double` casts use the plain reduce-mod convention. Every *other*
-64-bit invariant (ring laws, division, `sqrt`/`rsqrt`/`cbrt`, the `exp`/`log`
-families, `sin`/`cos`) is fully honored. Triton's scrambled-payload
+`narrow(widen(x)) == x`). `fp6` is off the chain. `fp64` (`double`) *is* in the
+tower (`p_64 = (p_32−1)·c + 1` with `c` coprime to `p_32−1`), so its casts are
+multiplicative too; the only wrinkle is that the `fp32`↔`fp64` edge dlogs over
+`p_32−1 ≈ 2^32`, where the linear scan is hopeless — but `p_32−1` is smooth by
+construction, so it goes by Pohlig–Hellman (factor the group order, one small dlog
+per prime power, CRT-combine) in a few thousand steps. Triton's scrambled-payload
 sign-resize *also* composes — but it is not multiplicative, which is the whole
 point. The one limit on composition, shared by all three (and by real IEEE), is
 that routing through a `U` narrower than both ends loses information the direct

@@ -548,19 +548,22 @@ int main()
           "fpsan free model: sqrt is a token (not multiplicative)");
 
     // ---- Field casts form a commutative diagram of homomorphisms ----
-    // The fp4|fp8|fp16|fp32 primes are a coprime tower, so every widening and
+    // The fp4|fp8|fp16|fp32|fp64 primes are a coprime tower, so every widening and
     // narrowing cast is multiplicative, they compose, and narrow(widen(x)) == x.
+    // The fp32<->fp64 edge dlogs over p_32-1 ~ 2^32 via Pohlig-Hellman.
     {
         using F8  = Value<fp8_e4m3, Semantics::FPSanAlgebraicField, Conversions::Explicit>;
         using F16 = Value<_Float16, Semantics::FPSanAlgebraicField, Conversions::Explicit>;
         using F32 = Value<float, Semantics::FPSanAlgebraicField, Conversions::Explicit>;
-        long  w16 = 0, w32 = 0, nA = 0, rt = 0, n = 0;
+        using F64 = Value<double, Semantics::FPSanAlgebraicField, Conversions::Explicit>;
+        long  w16 = 0, w32 = 0, nA = 0, rt = 0, w64 = 0, n64 = 0, rt64 = 0, n = 0;
         float xs[] = {1.f, 2.f, 3.f, 0.5f, 4.f, 6.f, 1.5f, 0.25f};
         for(float u : xs)
             for(float v : xs)
             {
                 F8  a{static_cast<fp8_e4m3>(u)}, b{static_cast<fp8_e4m3>(v)};
                 F32 c{u}, d{v};
+                F64 e{(double)u}, f{(double)v};
                 // widening is multiplicative (fp8 -> fp16, fp8 -> fp32)
                 w16 += (cast<_Float16>(a * b) == cast<_Float16>(a) * cast<_Float16>(b));
                 w32 += (cast<float>(a * b) == cast<float>(a) * cast<float>(b));
@@ -568,25 +571,37 @@ int main()
                 nA += (cast<fp8_e4m3>(c * d) == cast<fp8_e4m3>(c) * cast<fp8_e4m3>(d));
                 // up-then-down round trip recovers the original (narrow . widen == id)
                 rt += (cast<fp8_e4m3>(cast<float>(a)) == a);
+                // fp64 joins the tower: fp32<->fp64 multiplicative (Pohlig-Hellman),
+                // and the fp32->fp64->fp32 round trip is the identity.
+                w64 += (cast<double>(c * d) == cast<double>(c) * cast<double>(d));
+                n64 += (cast<float>(e * f) == cast<float>(e) * cast<float>(f));
+                rt64 += (cast<float>(cast<double>(c)) == c);
                 ++n;
             }
         check(w16 == n, "field cast fp8->fp16: multiplicative (cast(x*y)==cast(x)*cast(y))");
         check(w32 == n, "field cast fp8->fp32: multiplicative");
         check(nA == n, "field cast fp32->fp8: narrowing is multiplicative");
         check(rt == n, "field cast: narrow(widen(x)) == x (round-trip identity)");
+        check(w64 == n, "field cast fp32->fp64: multiplicative (Pohlig-Hellman dlog)");
+        check(n64 == n, "field cast fp64->fp32: narrowing is multiplicative (Pohlig-Hellman)");
+        check(rt64 == n, "field cast: narrow(widen(x)) == x across fp32<->fp64");
         // commutative diagram: widen direct == widen via an intermediate width
         {
-            long ok = 0, m = 0;
+            long ok = 0, ok64 = 0, m = 0;
             for(float u : xs)
             {
                 F8 a{static_cast<fp8_e4m3>(u)};
                 ok += (cast<float>(a) == cast<float>(cast<_Float16>(a))); // fp8->fp32 == fp8->fp16->fp32
+                // fp8->fp64 direct == fp8->fp32->fp64 (fp64 composes into the diagram)
+                ok64 += (cast<double>(a) == cast<double>(cast<float>(a)));
                 ++m;
             }
             check(ok == m, "field cast: fp8->fp32 == fp8->fp16->fp32 (widening composes)");
+            check(ok64 == m, "field cast: fp8->fp64 == fp8->fp32->fp64 (fp64 composes)");
         }
         check(cast<_Float16>(F8{static_cast<fp8_e4m3>(1.0f)}) == F16{static_cast<_Float16>(1.0f)},
               "field cast fp8->fp16: cast(1) == 1");
+        check(cast<double>(F8{static_cast<fp8_e4m3>(1.0f)}) == F64{1.0}, "field cast fp8->fp64: cast(1) == 1");
         check(cast<float>(Alg{1.25f}) == Alg{1.25f}, "field cast: same-width is identity");
     }
 
