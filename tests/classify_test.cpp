@@ -8,6 +8,7 @@
 #include "fpsan/amdgcn_classify.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -25,13 +26,14 @@ using fpsan::Value;
 static constexpr Conversions kCC = Conversions::Explicit;
 
 // Mask 0x3FF = all categories ON; classf returns true for any normal value.
+template <Semantics S>
 __global__ void k_classf_pair(const float* in, char* bf, char* bp)
 {
-    int                                 i = threadIdx.x;
+    int                                  i = threadIdx.x;
     Value<float, Semantics::Native, kCC> vf{in[i]};
-    Value<float, Semantics::FPSanLikeTriton, kCC> vp{in[i]};
+    Value<float, S, kCC>                 vp{in[i]};
     bf[i] = fpsan::amdgcn_classf<Semantics::Native, kCC>(vf, 0x3FF) ? 1 : 0;
-    bp[i] = fpsan::amdgcn_classf<Semantics::FPSanLikeTriton, kCC>(vp, 0x3FF) ? 1 : 0;
+    bp[i] = fpsan::amdgcn_classf<S, kCC>(vp, 0x3FF) ? 1 : 0;
 }
 
 TEST(Classify, ClassfFloatAndFpsanAgree)
@@ -49,35 +51,38 @@ TEST(Classify, ClassfFloatAndFpsanAgree)
     char *dBf, *dBp;
     HIP_CHECK(hipMalloc(&dBf, 32));
     HIP_CHECK(hipMalloc(&dBp, 32));
-    k_classf_pair<<<1, 32>>>(dIn, dBf, dBp);
-    HIP_CHECK(hipDeviceSynchronize());
-    char bf[32], bp[32];
-    HIP_CHECK(hipMemcpy(bf, dBf, 32, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(bp, dBp, 32, hipMemcpyDeviceToHost));
-    for(int i = 0; i < 32; ++i)
-    {
-        // Float and FPSan must agree with each other AND with an independent host
-        // reference: classf(v, 0x3FF) returns true for any value matching any of
-        // the 10 IEEE categories, which is true for every finite/inf/nan -- so
-        // for finite inputs (which our quarters are) it should be true.
-        EXPECT_EQ(int(bf[i]), int(bp[i])) << "lane " << i;
-        EXPECT_EQ(int(bf[i]), 1) << "lane " << i << " host ref: any finite";
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        k_classf_pair<decltype(sem)::value><<<1, 32>>>(dIn, dBf, dBp);
+        HIP_CHECK(hipDeviceSynchronize());
+        char bf[32], bp[32];
+        HIP_CHECK(hipMemcpy(bf, dBf, 32, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(bp, dBp, 32, hipMemcpyDeviceToHost));
+        for(int i = 0; i < 32; ++i)
+        {
+            // Float and FPSan must agree with each other AND with an independent host
+            // reference: classf(v, 0x3FF) returns true for any value matching any of
+            // the 10 IEEE categories, which is true for every finite/inf/nan -- so
+            // for finite inputs (which our quarters are) it should be true.
+            EXPECT_EQ(int(bf[i]), int(bp[i])) << "lane " << i;
+            EXPECT_EQ(int(bf[i]), 1) << "lane " << i << " host ref: any finite";
+        }
+    });
     (void)hipFree(dIn);
     (void)hipFree(dBf);
     (void)hipFree(dBp);
 }
 
+template <Semantics S>
 __global__ void k_fcmpf_pair(const float* a, const float* b, std::uint64_t* mf, std::uint64_t* mp)
 {
-    int                                 i = threadIdx.x;
+    int                                  i = threadIdx.x;
     Value<float, Semantics::Native, kCC> af{a[i]}, bf{b[i]};
-    Value<float, Semantics::FPSanLikeTriton, kCC> ap{a[i]}, bp{b[i]};
+    Value<float, S, kCC>                 ap{a[i]}, bp{b[i]};
     // Predicate 1 = OEQ (ordered equal); see LLVM fcmp predicates.
     if(i == 0)
     {
         *mf = fpsan::amdgcn_fcmpf<1, Semantics::Native, kCC>(af, bf);
-        *mp = fpsan::amdgcn_fcmpf<1, Semantics::FPSanLikeTriton, kCC>(ap, bp);
+        *mp = fpsan::amdgcn_fcmpf<1, S, kCC>(ap, bp);
     }
 }
 
@@ -101,12 +106,14 @@ TEST(Classify, FcmpfFloatAndFpsanAgree)
     std::uint64_t *dMf, *dMp;
     HIP_CHECK(hipMalloc(&dMf, sizeof(std::uint64_t)));
     HIP_CHECK(hipMalloc(&dMp, sizeof(std::uint64_t)));
-    k_fcmpf_pair<<<1, 32>>>(dA, dB, dMf, dMp);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::uint64_t mf = 0, mp = 0;
-    HIP_CHECK(hipMemcpy(&mf, dMf, sizeof mf, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(&mp, dMp, sizeof mp, hipMemcpyDeviceToHost));
-    EXPECT_EQ(mf, mp);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        k_fcmpf_pair<decltype(sem)::value><<<1, 32>>>(dA, dB, dMf, dMp);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::uint64_t mf = 0, mp = 0;
+        HIP_CHECK(hipMemcpy(&mf, dMf, sizeof mf, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(&mp, dMp, sizeof mp, hipMemcpyDeviceToHost));
+        EXPECT_EQ(mf, mp);
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dMf);
