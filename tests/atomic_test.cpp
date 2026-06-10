@@ -154,27 +154,27 @@ TEST(Atomic, FaddFpsanMatchesScalarRingSum)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    // Additive atomics are FREE-MODEL ONLY: the hardware integer atomic adds the
-    // payload mod 2^w, which is exactly Z/2^w (FPSanLikeTriton) but NOT the value
-    // model's Z/nZ -- a 256-lane sum of large residues overflows n, and the mod-2^w
-    // wrap diverges from mod-n. (min/max below are order-based and DO generalize.)
+    // The atomic_fadd wrapper uses a CAS loop with the per-semantics add, so it is
+    // correct for every value model (mod n), not just the free model's mod 2^w.
     auto   in  = make_inputs();
     float* dIn = to_dev(in);
-    using V    = Value<float, Semantics::FPSanLikeTriton, kCC>;
-    V* dSlot;
-    HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
-    V init{0.f};
-    HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fadd<Semantics::FPSanLikeTriton><<<1, LANES>>>(dSlot, dIn);
-    HIP_CHECK(hipDeviceSynchronize());
-    V got{0.f};
-    HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
-    V acc{0.f};
-    for(float x : in)
-        acc = acc + V{x};
-    EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        using V = Value<float, decltype(sem)::value, kCC>;
+        V* dSlot;
+        HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
+        V init{0.f};
+        HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
+        k_atomic_fadd<decltype(sem)::value><<<1, LANES>>>(dSlot, dIn);
+        HIP_CHECK(hipDeviceSynchronize());
+        V got{0.f};
+        HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
+        V acc{0.f};
+        for(float x : in)
+            acc = acc + V{x};
+        EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+        (void)hipFree(dSlot);
+    });
     (void)hipFree(dIn);
-    (void)hipFree(dSlot);
 }
 
 // ---- atomic_fmin / atomic_fmax: final value = min / max of all lanes -------
@@ -345,25 +345,26 @@ TEST(Atomic, Fadd64FpsanMatchesScalarRingSum)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    // Free-model only (see FaddFpsanMatchesScalarRingSum): the hardware atomic
-    // adds payloads mod 2^w, which is Z/2^w but not the value model's Z/nZ.
+    // CAS-loop wrapper makes atomic_fadd64 correct for every value model.
     auto    in  = make_inputs64();
     double* dIn = to_dev(in);
-    using V     = Value<double, Semantics::FPSanLikeTriton, kCC>;
-    V* dSlot;
-    HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
-    V init{0.0};
-    HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fadd64<Semantics::FPSanLikeTriton><<<1, LANES>>>(dSlot, dIn);
-    HIP_CHECK(hipDeviceSynchronize());
-    V got{0.0};
-    HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
-    V acc{0.0};
-    for(double x : in)
-        acc = acc + V{x};
-    EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        using V = Value<double, decltype(sem)::value, kCC>;
+        V* dSlot;
+        HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
+        V init{0.0};
+        HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
+        k_atomic_fadd64<decltype(sem)::value><<<1, LANES>>>(dSlot, dIn);
+        HIP_CHECK(hipDeviceSynchronize());
+        V got{0.0};
+        HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
+        V acc{0.0};
+        for(double x : in)
+            acc = acc + V{x};
+        EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+        (void)hipFree(dSlot);
+    });
     (void)hipFree(dIn);
-    (void)hipFree(dSlot);
 }
 
 TEST(Atomic, Fmin64FloatMatchesScalarMin)
@@ -520,8 +521,9 @@ TEST(Atomic, PkAddF16Float)
 }
 TEST(Atomic, PkAddF16Fpsan)
 {
-    // Free-model only: packed atomic add is also a mod-2^w accumulation.
-    run_pk_add<v2h_t, _Float16, Semantics::FPSanLikeTriton>(k_atomic_pk_f16<Semantics::FPSanLikeTriton>);
+    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+        run_pk_add<v2h_t, _Float16, decltype(sem)::value>(k_atomic_pk_f16<decltype(sem)::value>);
+    });
 }
 TEST(Atomic, PkAddBf16Float)
 {
@@ -529,6 +531,7 @@ TEST(Atomic, PkAddBf16Float)
 }
 TEST(Atomic, PkAddBf16Fpsan)
 {
-    // Free-model only: packed atomic add is also a mod-2^w accumulation.
-    run_pk_add<v2bf_t, __bf16, Semantics::FPSanLikeTriton>(k_atomic_pk_bf16<Semantics::FPSanLikeTriton>);
+    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+        run_pk_add<v2bf_t, __bf16, decltype(sem)::value>(k_atomic_pk_bf16<decltype(sem)::value>);
+    });
 }
