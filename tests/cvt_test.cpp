@@ -7,6 +7,7 @@
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -33,13 +34,14 @@ __global__ void k_cvt_pkrtz_float(const float* a, const float* b, std::uint32_t*
     out[i]                                  = __builtin_bit_cast(std::uint32_t, vec);
 }
 
+template <Semantics S>
 __global__ void k_cvt_pkrtz_fpsan(const float* a, const float* b, std::uint32_t* out)
 {
-    int                                 i = threadIdx.x;
-    Value<float, Semantics::FPSanLikeTriton, kCC> av{a[i]}, bv{b[i]};
-    auto                                r = fpsan::amdgcn_cvt_pkrtz<Semantics::FPSanLikeTriton, kCC>(av, bv);
-    auto                                pay = r.fpsan_payload(); // v2u16
-    out[i]                                  = __builtin_bit_cast(std::uint32_t, pay);
+    int                   i = threadIdx.x;
+    Value<float, S, kCC>  av{a[i]}, bv{b[i]};
+    auto                  r   = fpsan::amdgcn_cvt_pkrtz<S, kCC>(av, bv);
+    auto                  pay = r.fpsan_payload(); // v2u16
+    out[i]                    = __builtin_bit_cast(std::uint32_t, pay);
 }
 
 TEST(Cvt, PkrtzFloatMatchesBuiltin)
@@ -105,20 +107,23 @@ TEST(Cvt, PkrtzFpsanMatchesPerLaneCast)
     HIP_CHECK(hipMalloc(&dOut, 32 * sizeof(std::uint32_t)));
     HIP_CHECK(hipMemcpy(dA, a.data(), 32 * sizeof(float), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dB, b.data(), 32 * sizeof(float), hipMemcpyHostToDevice));
-    k_cvt_pkrtz_fpsan<<<1, 32>>>(dA, dB, dOut);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<std::uint32_t> got(32);
-    HIP_CHECK(hipMemcpy(got.data(), dOut, 32 * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    using F = Value<float, Semantics::FPSanLikeTriton, kCC>;
-    using H = Value<_Float16, Semantics::FPSanLikeTriton, kCC>;
-    for(int i = 0; i < 32; ++i)
-    {
-        H             ah       = fpsan::cast<_Float16>(F{a[i]});
-        H             bh       = fpsan::cast<_Float16>(F{b[i]});
-        std::uint32_t expected = static_cast<std::uint32_t>(ah.fpsan_payload())
-                                 | (static_cast<std::uint32_t>(bh.fpsan_payload()) << 16);
-        EXPECT_EQ(got[i], expected) << "lane " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        k_cvt_pkrtz_fpsan<S><<<1, 32>>>(dA, dB, dOut);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<std::uint32_t> got(32);
+        HIP_CHECK(hipMemcpy(got.data(), dOut, 32 * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        using F = Value<float, S, kCC>;
+        using H = Value<_Float16, S, kCC>;
+        for(int i = 0; i < 32; ++i)
+        {
+            H             ah       = fpsan::cast<_Float16>(F{a[i]});
+            H             bh       = fpsan::cast<_Float16>(F{b[i]});
+            std::uint32_t expected = static_cast<std::uint32_t>(ah.fpsan_payload())
+                                     | (static_cast<std::uint32_t>(bh.fpsan_payload()) << 16);
+            EXPECT_EQ(got[i], expected) << "lane " << i;
+        }
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dOut);
@@ -163,7 +168,7 @@ namespace
 } // namespace
 
 // ---- cvt_f32_fp8 / cvt_f32_bf8 (unpack) ------------------------------------
-template <int Idx>
+template <int Idx, Semantics S>
 __global__ void k_cvt_f32_fp8_pair(const int*     packed,
                                    float*         direct,
                                    float*         wrapper,
@@ -176,13 +181,12 @@ __global__ void k_cvt_f32_fp8_pair(const int*     packed,
         = static_cast<float>(fpsan::amdgcn_cvt_f32_fp8<Idx, Semantics::Native, kCC>(packed[i]));
     const std::uint32_t u    = static_cast<std::uint32_t>(packed[i]);
     const std::uint8_t  byte = static_cast<std::uint8_t>((u >> (Idx * 8)) & 0xFFu);
-    auto                v = Value<fpsan::fp8_e4m3, Semantics::FPSanLikeTriton, kCC>::from_fpsan_payload(byte);
-    pay_direct[i]         = fpsan::cast<float>(v).fpsan_payload();
-    pay_wrapper[i]
-        = fpsan::amdgcn_cvt_f32_fp8<Idx, Semantics::FPSanLikeTriton, kCC>(packed[i]).fpsan_payload();
+    auto                v    = Value<fpsan::fp8_e4m3, S, kCC>::from_fpsan_payload(byte);
+    pay_direct[i]            = fpsan::cast<float>(v).fpsan_payload();
+    pay_wrapper[i]           = fpsan::amdgcn_cvt_f32_fp8<Idx, S, kCC>(packed[i]).fpsan_payload();
 }
 
-template <int Idx>
+template <int Idx, Semantics S>
 __global__ void k_cvt_f32_bf8_pair(const int*     packed,
                                    float*         direct,
                                    float*         wrapper,
@@ -195,10 +199,9 @@ __global__ void k_cvt_f32_bf8_pair(const int*     packed,
         = static_cast<float>(fpsan::amdgcn_cvt_f32_bf8<Idx, Semantics::Native, kCC>(packed[i]));
     const std::uint32_t u    = static_cast<std::uint32_t>(packed[i]);
     const std::uint8_t  byte = static_cast<std::uint8_t>((u >> (Idx * 8)) & 0xFFu);
-    auto                v = Value<fpsan::fp8_e5m2, Semantics::FPSanLikeTriton, kCC>::from_fpsan_payload(byte);
-    pay_direct[i]         = fpsan::cast<float>(v).fpsan_payload();
-    pay_wrapper[i]
-        = fpsan::amdgcn_cvt_f32_bf8<Idx, Semantics::FPSanLikeTriton, kCC>(packed[i]).fpsan_payload();
+    auto                v    = Value<fpsan::fp8_e5m2, S, kCC>::from_fpsan_payload(byte);
+    pay_direct[i]            = fpsan::cast<float>(v).fpsan_payload();
+    pay_wrapper[i]           = fpsan::amdgcn_cvt_f32_bf8<Idx, S, kCC>(packed[i]).fpsan_payload();
 }
 
 #define CVT_F32_FP8_TEST(FAMILY, IDX)                                                             \
@@ -217,7 +220,9 @@ __global__ void k_cvt_f32_bf8_pair(const int*     packed,
         HIP_CHECK(hipMalloc(&dPdir, kFp8N * sizeof(std::uint32_t)));                              \
         HIP_CHECK(hipMalloc(&dPwrap, kFp8N * sizeof(std::uint32_t)));                             \
         HIP_CHECK(hipMemcpy(dIn, in.data(), kFp8N * sizeof(int), hipMemcpyHostToDevice));         \
-        k_##FAMILY##_pair<IDX><<<1, kFp8N>>>(dIn, dDir, dWrap, dPdir, dPwrap);                    \
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {                                      \
+        k_##FAMILY##_pair<IDX, decltype(sem)::value><<<1, kFp8N>>>(dIn, dDir, dWrap, dPdir,       \
+                                                                  dPwrap);                       \
         HIP_CHECK(hipDeviceSynchronize());                                                        \
         std::vector<float>         dir(kFp8N), wrap(kFp8N);                                       \
         std::vector<std::uint32_t> pdir(kFp8N), pwrap(kFp8N);                                     \
@@ -234,6 +239,7 @@ __global__ void k_cvt_f32_bf8_pair(const int*     packed,
                 EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;             \
             EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                   \
         }                                                                                         \
+        });                                                                                       \
         (void)hipFree(dIn);                                                                       \
         (void)hipFree(dDir);                                                                      \
         (void)hipFree(dWrap);                                                                     \
@@ -274,14 +280,14 @@ __global__ void
     wrapper[i] = fpsan::amdgcn_cvt_pk_bf8_f32<DstLo, Semantics::Native, kCC>(av, bv, old[i]);
 }
 
-template <bool DstLo>
+template <bool DstLo, Semantics S>
 __global__ void k_cvt_pk_fp8_fpsan(
     const float* a, const float* b, const int* old, int* got_expected, int* got_wrapper)
 {
-    int                                 i = threadIdx.x;
-    Value<float, Semantics::FPSanLikeTriton, kCC> av{a[i]}, bv{b[i]};
-    auto                                afp8 = fpsan::cast<fpsan::fp8_e4m3>(av);
-    auto                                bfp8 = fpsan::cast<fpsan::fp8_e4m3>(bv);
+    int                  i = threadIdx.x;
+    Value<float, S, kCC> av{a[i]}, bv{b[i]};
+    auto                 afp8 = fpsan::cast<fpsan::fp8_e4m3>(av);
+    auto                 bfp8 = fpsan::cast<fpsan::fp8_e4m3>(bv);
     std::uint8_t                        ab   = static_cast<std::uint8_t>(afp8.fpsan_payload());
     std::uint8_t                        bb   = static_cast<std::uint8_t>(bfp8.fpsan_payload());
     std::uint32_t                       u    = static_cast<std::uint32_t>(old[i]);
@@ -292,17 +298,17 @@ __global__ void k_cvt_pk_fp8_fpsan(
         u = (u & 0x0000FFFFu) | (static_cast<std::uint32_t>(ab) << 16)
             | (static_cast<std::uint32_t>(bb) << 24);
     got_expected[i] = static_cast<int>(u);
-    got_wrapper[i]  = fpsan::amdgcn_cvt_pk_fp8_f32<DstLo, Semantics::FPSanLikeTriton, kCC>(av, bv, old[i]);
+    got_wrapper[i]  = fpsan::amdgcn_cvt_pk_fp8_f32<DstLo, S, kCC>(av, bv, old[i]);
 }
 
-template <bool DstLo>
+template <bool DstLo, Semantics S>
 __global__ void k_cvt_pk_bf8_fpsan(
     const float* a, const float* b, const int* old, int* got_expected, int* got_wrapper)
 {
-    int                                 i = threadIdx.x;
-    Value<float, Semantics::FPSanLikeTriton, kCC> av{a[i]}, bv{b[i]};
-    auto                                afp8 = fpsan::cast<fpsan::fp8_e5m2>(av);
-    auto                                bfp8 = fpsan::cast<fpsan::fp8_e5m2>(bv);
+    int                  i = threadIdx.x;
+    Value<float, S, kCC> av{a[i]}, bv{b[i]};
+    auto                 afp8 = fpsan::cast<fpsan::fp8_e5m2>(av);
+    auto                 bfp8 = fpsan::cast<fpsan::fp8_e5m2>(bv);
     std::uint8_t                        ab   = static_cast<std::uint8_t>(afp8.fpsan_payload());
     std::uint8_t                        bb   = static_cast<std::uint8_t>(bfp8.fpsan_payload());
     std::uint32_t                       u    = static_cast<std::uint32_t>(old[i]);
@@ -313,7 +319,7 @@ __global__ void k_cvt_pk_bf8_fpsan(
         u = (u & 0x0000FFFFu) | (static_cast<std::uint32_t>(ab) << 16)
             | (static_cast<std::uint32_t>(bb) << 24);
     got_expected[i] = static_cast<int>(u);
-    got_wrapper[i]  = fpsan::amdgcn_cvt_pk_bf8_f32<DstLo, Semantics::FPSanLikeTriton, kCC>(av, bv, old[i]);
+    got_wrapper[i]  = fpsan::amdgcn_cvt_pk_bf8_f32<DstLo, S, kCC>(av, bv, old[i]);
 }
 
 #define CVT_PK_FP8_FLOAT_TEST(FAMILY, DSTLO)                                                  \
@@ -373,13 +379,16 @@ CVT_PK_FP8_FLOAT_TEST(cvt_pk_bf8_f32, false)
         HIP_CHECK(hipMemcpy(dA, a.data(), kFp8N * sizeof(float), hipMemcpyHostToDevice));     \
         HIP_CHECK(hipMemcpy(dB, b.data(), kFp8N * sizeof(float), hipMemcpyHostToDevice));     \
         HIP_CHECK(hipMemcpy(dOld, old.data(), kFp8N * sizeof(int), hipMemcpyHostToDevice));   \
-        k_##FAMILY##_fpsan<DSTLO><<<1, kFp8N>>>(dA, dB, dOld, dExp, dWrap);                   \
-        HIP_CHECK(hipDeviceSynchronize());                                                    \
-        std::vector<int> exp(kFp8N), wrap(kFp8N);                                             \
-        HIP_CHECK(hipMemcpy(exp.data(), dExp, kFp8N * sizeof(int), hipMemcpyDeviceToHost));   \
-        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFp8N * sizeof(int), hipMemcpyDeviceToHost)); \
-        for(int i = 0; i < kFp8N; ++i)                                                        \
-            EXPECT_EQ(wrap[i], exp[i]) << "lane " << i;                                       \
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {                                  \
+            k_##FAMILY##_fpsan<DSTLO, decltype(sem)::value>                                   \
+                <<<1, kFp8N>>>(dA, dB, dOld, dExp, dWrap);                                     \
+            HIP_CHECK(hipDeviceSynchronize());                                                \
+            std::vector<int> exp(kFp8N), wrap(kFp8N);                                         \
+            HIP_CHECK(hipMemcpy(exp.data(), dExp, kFp8N * sizeof(int), hipMemcpyDeviceToHost)); \
+            HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFp8N * sizeof(int), hipMemcpyDeviceToHost)); \
+            for(int i = 0; i < kFp8N; ++i)                                                    \
+                EXPECT_EQ(wrap[i], exp[i]) << "lane " << i;                                   \
+        });                                                                                  \
         (void)hipFree(dA);                                                                    \
         (void)hipFree(dB);                                                                    \
         (void)hipFree(dOld);                                                                  \
