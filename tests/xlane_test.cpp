@@ -13,6 +13,7 @@
 #include "fpsan/amdgcn_wave.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 
 #include <hip/hip_runtime.h>
@@ -88,11 +89,11 @@ TEST(Xlane, ReadlaneFloat17)
 }
 TEST(Xlane, ReadlaneFpsan0)
 {
-    test_readlane<Semantics::FPSanLikeTriton>(0);
+    FPSAN_RUN_ALL_VARIANTS(test_readlane, 0);
 }
 TEST(Xlane, ReadlaneFpsan17)
 {
-    test_readlane<Semantics::FPSanLikeTriton>(17);
+    FPSAN_RUN_ALL_VARIANTS(test_readlane, 17);
 }
 
 // ---- readfirstlane (= readlane(0) when lane 0 is active) --------------------
@@ -140,7 +141,7 @@ TEST(Xlane, ReadfirstlaneFloat)
 }
 TEST(Xlane, ReadfirstlaneFpsan)
 {
-    test_readfirstlane<Semantics::FPSanLikeTriton>();
+    FPSAN_RUN_ALL_VARIANTS(test_readfirstlane, );
 }
 
 // ---- ds_bpermute (gather: result[lane] = src[addr[lane]/4]) -----------------
@@ -198,11 +199,11 @@ TEST(Xlane, DsBpermuteXorFloat16)
 }
 TEST(Xlane, DsBpermuteXorFpsan1)
 {
-    test_ds_bpermute_xor<Semantics::FPSanLikeTriton>(1);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_xor, 1);
 }
 TEST(Xlane, DsBpermuteXorFpsan16)
 {
-    test_ds_bpermute_xor<Semantics::FPSanLikeTriton>(16);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_xor, 16);
 }
 
 // ---- ds_permute (scatter: result[addr[lane]/4] = src[lane]) -----------------
@@ -261,11 +262,11 @@ TEST(Xlane, DsPermuteXorFloat16)
 }
 TEST(Xlane, DsPermuteXorFpsan1)
 {
-    test_ds_permute_xor<Semantics::FPSanLikeTriton>(1);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_permute_xor, 1);
 }
 TEST(Xlane, DsPermuteXorFpsan16)
 {
-    test_ds_permute_xor<Semantics::FPSanLikeTriton>(16);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_permute_xor, 16);
 }
 
 // ---- ds_swizzle (cross-mode consistency) ------------------------------------
@@ -391,7 +392,7 @@ TEST(Xlane, MovDppIdentityFloat)
 }
 TEST(Xlane, MovDppIdentityFpsan)
 {
-    test_mov_dpp_identity<Semantics::FPSanLikeTriton>();
+    FPSAN_RUN_ALL_VARIANTS(test_mov_dpp_identity, );
 }
 
 // ---- mov_dpp8 (identity selector 0x76543210 = lane i reads lane i) ----------

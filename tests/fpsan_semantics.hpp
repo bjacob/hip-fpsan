@@ -48,4 +48,11 @@ void for_each_fpsan_semantics(F&& f)
 
 } // namespace fpsan_test
 
+// Convenience for tests whose body is a single Semantics-templated function
+// fn<S>(args...): run it for every FPSan-family variant.
+//   TEST(Foo, BarFpsan) { FPSAN_RUN_ALL_VARIANTS(test_bar, 17); }
+#define FPSAN_RUN_ALL_VARIANTS(fn, ...)                  \
+    ::fpsan_test::for_each_fpsan_semantics(              \
+        [&](auto sem) { fn<decltype(sem)::value>(__VA_ARGS__); })
+
 #endif // FPSAN_TESTS_FPSAN_SEMANTICS_HPP
