@@ -686,15 +686,24 @@ namespace fpsan
         // its own homomorphism and inverse, and NO numeric relation between bases is
         // claimed. Base e is K=1 (alg_exp1/alg_log1); base 2 and base 10 use the
         // distinct salted constants below. Field / sub-byte fall back to tokens.
-        FPSAN_HOST_DEVICE constexpr u64 alg_base_const(u64 d, u64 magic, u64 fallback)
+        // A pseudo-random unit in [2, d-1] (so != 0 and != 1, the base-e multiplier).
+        // The order-d subgroup is cyclic of PRIME order, so all d-1 non-identity
+        // elements are generators -- one per base. d < 3 (only Trig at fp8, d=3) has a
+        // single non-trivial unit, so its bases coincide; for every other modulus the
+        // bases are kept distinct (Field / sub-byte: d==0, caller returns a token).
+        FPSAN_HOST_DEVICE constexpr u64 alg_base_unit(u64 d, u64 magic)
         {
-            if(d == 0)
-                return 0; // Field / sub-byte: no order-d channel (caller returns a token)
-            const u64 k = magic % d;
-            return (k <= 1) ? ((fallback % d) <= 1 ? (2 % d) : (fallback % d)) : k;
+            return (d < 3) ? 0 : 2 + magic % (d - 2);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_exp2_base(u64 d) { return alg_base_const(d, 2654435761ull, 2); }
-        FPSAN_HOST_DEVICE constexpr u64 alg_exp10_base(u64 d) { return alg_base_const(d, 3266489917ull, 3); }
+        FPSAN_HOST_DEVICE constexpr u64 alg_exp2_base(u64 d) { return alg_base_unit(d, 2654435761ull); }
+        FPSAN_HOST_DEVICE constexpr u64 alg_exp10_base(u64 d)
+        {
+            if(d < 3)
+                return 0;
+            const u64 k = alg_base_unit(d, 3266489917ull);
+            // keep base 10 distinct from base 2 (and from base e = 1; k >= 2 already)
+            return (k == alg_exp2_base(d)) ? (2 + (k - 1) % (d - 2)) : k;
+        }
 
         FPSAN_HOST_DEVICE constexpr u64 alg_expb_1(const AlgConfig& c, u64 a, u64 K, u64 tag)
         {
