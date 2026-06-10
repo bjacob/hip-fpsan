@@ -183,6 +183,34 @@ int main()
     check(log2(Alg{2.0f} * Alg{3.0f}) != log2(Alg{2.0f}) + log2(Alg{3.0f}),
           "field: log2 is NOT a homomorphism (tagged token)");
 
+    // ---- exp10 / log10: the base-10 members of the same family ----
+    check(exp10(Exp{0.0f}) == Exp{1.0f}, "exp10: exp10(0) == 1");
+    check(log10(Exp{1.0f}) == Exp{0.0f}, "log10: log10(1) == 0");
+    {
+        long  e10 = 0, l10 = 0, inv = 0, n = 0;
+        float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 5.0f, 7.0f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                e10 += (exp10(a + b) == exp10(a) * exp10(b));
+                l10 += (log10(a * b) == log10(a) + log10(b));
+                inv += (exp10(log10(exp10(a))) == exp10(a));
+                ++n;
+            }
+        check(e10 == n, "exp10: exp10(a+b) == exp10(a)*exp10(b) (Exponentials variant)");
+        check(l10 == n, "log10: log10(x*y) == log10(x)+log10(y)");
+        check(inv == n, "log10: exp10(log10(exp10 v)) == exp10 v");
+    }
+    // the three bases are distinct fingerprints (e, 2, 10)
+    check(exp10(Exp{2.0f}) != exp(Exp{2.0f}) && exp10(Exp{2.0f}) != exp2(Exp{2.0f}),
+          "exp10 != exp and != exp2 (distinct base)");
+    // carries to Trig; tokens in the Field variant
+    check(exp10(Trig{1.0f} + Trig{2.0f}) == exp10(Trig{1.0f}) * exp10(Trig{2.0f}),
+          "trig: exp10 homomorphism holds");
+    check(exp10(Alg{1.25f} + Alg{2.5f}) != exp10(Alg{1.25f}) * exp10(Alg{2.5f}),
+          "field: exp10 is NOT a homomorphism (tagged token)");
+
     // ---- sqrt / cbrt / rsqrt: multiplicative algebraic roots ----
     check(Alg::alg_cfg().has_cbrt, "field: cbrt is a perfect cube root (has_cbrt)");
     {

@@ -199,6 +199,44 @@ namespace fpsan
         }
     }
 
+    // exp10 / log10: base-10 members of the exp_b/log_b family. The Exp/Trig
+    // variants honor them as genuine homomorphisms on the order-d channel (a fixed
+    // base change, like exp2/log2). Triton has no exp10/log10 op (it lowers them to
+    // libdevice externs), so FPSan mode tags them by symbol name. Note: std::exp10
+    // is non-standard, so the Float path uses pow(10, v); std::log10 is standard.
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_HOST_DEVICE Value<FT, S, C> exp10(Value<FT, S, C> x)
+    {
+        using F = Value<FT, S, C>;
+        if constexpr(F::semantics == Semantics::FPSanLikeTriton)
+            return FPSAN_FROM_PAYLOAD(
+                F, detail::payload_extern_tagged(
+                       F::config, detail::stable_string_hash("exp10"), x.fpsan_payload()));
+        else if constexpr(F::is_algebraic)
+            return FPSAN_FROM_PAYLOAD(F, detail::alg_exp10(F::alg_cfg(), x.fpsan_payload()));
+        else
+        {
+            const detail::compute_t<FT> v = static_cast<detail::compute_t<FT>>(x.to_float());
+            return F(static_cast<FT>(std::pow(detail::compute_t<FT>(10), v)));
+        }
+    }
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_HOST_DEVICE Value<FT, S, C> log10(Value<FT, S, C> x)
+    {
+        using F = Value<FT, S, C>;
+        if constexpr(F::semantics == Semantics::FPSanLikeTriton)
+            return FPSAN_FROM_PAYLOAD(
+                F, detail::payload_extern_tagged(
+                       F::config, detail::stable_string_hash("log10"), x.fpsan_payload()));
+        else if constexpr(F::is_algebraic)
+            return FPSAN_FROM_PAYLOAD(F, detail::alg_log10(F::alg_cfg(), x.fpsan_payload()));
+        else
+        {
+            const detail::compute_t<FT> v = static_cast<detail::compute_t<FT>>(x.to_float());
+            return F(static_cast<FT>(std::log10(v)));
+        }
+    }
+
     // ---- modular binary / ternary: fma, fmod, fmin/fmax, min/max ---------------
     template <class FT, Semantics S, Conversions C>
     FPSAN_HOST_DEVICE Value<FT, S, C> fma(Value<FT, S, C> a, Value<FT, S, C> b, Value<FT, S, C> c)

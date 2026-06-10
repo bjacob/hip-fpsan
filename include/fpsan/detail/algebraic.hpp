@@ -679,29 +679,35 @@ namespace fpsan
         // honors its OWN homomorphism exp2(a+b)==exp2(a)*exp2(b) and log2 is its
         // exact inverse log2(x*y)==log2(x)+log2(y), but NO numeric relation to
         // exp/log is claimed. Field variants (no d-channel) fall back to tokens.
-        FPSAN_HOST_DEVICE constexpr u64 alg_exp2_base(u64 d)
+        // exp_b / log_b family: a base-b exponential on the same order-d channel,
+        // exp_b(v) = g^(K_b * v mod d) for a fixed per-base unit K_b, with log_b its
+        // exact inverse. The true inter-base constant (log_b e) is irrational, so K_b
+        // is a magic number (exactly the role Triton's rcpLog2 plays): each base keeps
+        // its own homomorphism and inverse, and NO numeric relation between bases is
+        // claimed. Base e is K=1 (alg_exp1/alg_log1); base 2 and base 10 use the
+        // distinct salted constants below. Field / sub-byte fall back to tokens.
+        FPSAN_HOST_DEVICE constexpr u64 alg_base_const(u64 d, u64 magic, u64 fallback)
         {
-            const u64 k = 2654435761ull % d; // Knuth golden-ratio multiplier, mod d
-            return (k <= 1) ? (2 % d) : k;   // tiny d (3,5): only base 2 is distinct
+            if(d == 0)
+                return 0; // Field / sub-byte: no order-d channel (caller returns a token)
+            const u64 k = magic % d;
+            return (k <= 1) ? ((fallback % d) <= 1 ? (2 % d) : (fallback % d)) : k;
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_exp2_1(const AlgConfig& c, u64 a)
+        FPSAN_HOST_DEVICE constexpr u64 alg_exp2_base(u64 d) { return alg_base_const(d, 2654435761ull, 2); }
+        FPSAN_HOST_DEVICE constexpr u64 alg_exp10_base(u64 d) { return alg_base_const(d, 3266489917ull, 3); }
+
+        FPSAN_HOST_DEVICE constexpr u64 alg_expb_1(const AlgConfig& c, u64 a, u64 K, u64 tag)
         {
             if(!c.two_moduli)
-                return alg_tagged1(c, a, 0x65787032ull /*"exp2"*/);
+                return alg_tagged1(c, a, tag);
             if(!alg_is_fin(c, a))
                 return c.nan_code;
-            const u64 K = alg_exp2_base(c.d);
             return alg_powmod(c.g, (K * (a % c.d)) % c.d, c.n); // g^(K*v mod d)
         }
-        template <class Bits>
-        FPSAN_HOST_DEVICE constexpr Bits alg_exp2(const AlgConfig& c, Bits a)
-        {
-            return alg_lanewise1(a, [&](u64 x) { return alg_exp2_1(c, x); });
-        }
-        FPSAN_HOST_DEVICE constexpr u64 alg_log2_1(const AlgConfig& c, u64 r)
+        FPSAN_HOST_DEVICE constexpr u64 alg_logb_1(const AlgConfig& c, u64 r, u64 K, u64 tag)
         {
             if(!c.two_moduli)
-                return alg_tagged1(c, r, 0x6C6F6732ull /*"log2"*/);
+                return alg_tagged1(c, r, tag);
             if(!alg_is_fin(c, r))
                 return c.nan_code;
             if(r == 0)
@@ -709,15 +715,30 @@ namespace fpsan
             const u64 k = alg_dlog1(c, r);
             if(k >= c.d)
                 return c.nan_code;
-            const u64 K    = alg_exp2_base(c.d);
             const u64 Kinv = alg_powmod(K, c.d - 2, c.d); // K^(d-2) = K^-1 mod prime d
             return ((c.n / c.d) * ((Kinv * k) % c.d)) % c.n;
         }
+        FPSAN_HOST_DEVICE constexpr u64 alg_exp2_1(const AlgConfig& c, u64 a)
+        { return alg_expb_1(c, a, alg_exp2_base(c.d), 0x65787032ull /*"exp2"*/); }
+        FPSAN_HOST_DEVICE constexpr u64 alg_log2_1(const AlgConfig& c, u64 r)
+        { return alg_logb_1(c, r, alg_exp2_base(c.d), 0x6C6F6732ull /*"log2"*/); }
+        FPSAN_HOST_DEVICE constexpr u64 alg_exp10_1(const AlgConfig& c, u64 a)
+        { return alg_expb_1(c, a, alg_exp10_base(c.d), 0x6578703130ull /*"exp10"*/); }
+        FPSAN_HOST_DEVICE constexpr u64 alg_log10_1(const AlgConfig& c, u64 r)
+        { return alg_logb_1(c, r, alg_exp10_base(c.d), 0x6C6F673130ull /*"log10"*/); }
+
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_exp2(const AlgConfig& c, Bits a)
+        { return alg_lanewise1(a, [&](u64 x) { return alg_exp2_1(c, x); }); }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_log2(const AlgConfig& c, Bits r)
-        {
-            return alg_lanewise1(r, [&](u64 x) { return alg_log2_1(c, x); });
-        }
+        { return alg_lanewise1(r, [&](u64 x) { return alg_log2_1(c, x); }); }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_exp10(const AlgConfig& c, Bits a)
+        { return alg_lanewise1(a, [&](u64 x) { return alg_exp10_1(c, x); }); }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_log10(const AlgConfig& c, Bits r)
+        { return alg_lanewise1(r, [&](u64 x) { return alg_log10_1(c, x); }); }
 
         // ---- sin / cos via an order-d rotation in (Z/n)[i], i^2 = -1 (Trig only) -
         // cos(x)=Re(omega^(x mod d)), sin(x)=Im(omega^(x mod d)). Since omega has
