@@ -12,6 +12,8 @@
 #include "fpsan/amdgcn_math.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
+
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -36,6 +38,7 @@ static constexpr Conversions kCC = Conversions::Explicit;
 //   payload-for-payload equality.
 
 #define AMDGCN_MATH_UNARY_KERNEL(name, FT)                                        \
+    template <Semantics S>                                                        \
     __global__ void k_##name##_pair(const FT*      in,                            \
                                     FT*            direct,                        \
                                     FT*            via_wrapper,                   \
@@ -49,9 +52,9 @@ static constexpr Conversions kCC = Conversions::Explicit;
         Value<FT, Semantics::Native, kCC> vf{x};                                   \
         via_wrapper[i] = static_cast<FT>(fpsan::name<Semantics::Native, kCC>(vf)); \
         /* FPSan-mode: tagged op vs wrapper. */                                   \
-        Value<FT, Semantics::FPSanLikeTriton, kCC> vp{x};                                   \
+        Value<FT, S, kCC> vp{x};                                                  \
         pay_direct[i]  = fpsan::FPSAN_OP_FOR_##name(vp).fpsan_payload();          \
-        pay_wrapper[i] = fpsan::name<Semantics::FPSanLikeTriton, kCC>(vp).fpsan_payload();  \
+        pay_wrapper[i] = fpsan::name<S, kCC>(vp).fpsan_payload();                  \
     }
 
 // Map each wrapper to its underlying fpsan:: tagged op.
@@ -113,7 +116,8 @@ namespace
         HIP_CHECK(hipMalloc(&dWrap, N * sizeof(float)));                                        \
         HIP_CHECK(hipMalloc(&dPdir, N * sizeof(std::uint32_t)));                                \
         HIP_CHECK(hipMalloc(&dPwrap, N * sizeof(std::uint32_t)));                               \
-        k_##name##_pair<<<1, N>>>(dIn, dDirect, dWrap, dPdir, dPwrap);                          \
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {                                    \
+        k_##name##_pair<decltype(sem)::value><<<1, N>>>(dIn, dDirect, dWrap, dPdir, dPwrap);    \
         HIP_CHECK(hipDeviceSynchronize());                                                      \
         std::vector<float>         direct(N), wrap(N);                                          \
         std::vector<std::uint32_t> pdir(N), pwrap(N);                                           \
@@ -128,6 +132,7 @@ namespace
             EXPECT_EQ(bits_u32(wrap[i]), bits_u32(direct[i])) << "Float lane " << i;            \
             EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                 \
         }                                                                                       \
+        });                                                                                     \
         (void)hipFree(dIn);                                                                     \
         (void)hipFree(dDirect);                                                                 \
         (void)hipFree(dWrap);                                                                   \
@@ -160,6 +165,7 @@ using v2bf  = __bf16 __attribute__((ext_vector_type(2)));
 using v2i16 = short __attribute__((ext_vector_type(2)));
 
 // ---- fdot2: v2h x v2h -> f32 -----------------------------------------------
+template <Semantics S>
 __global__ void k_fdot2_pair(const v2h*     a,
                              const v2h*     b,
                              const float*   c,
@@ -175,16 +181,17 @@ __global__ void k_fdot2_pair(const v2h*     a,
     Value<v2h, Semantics::Native, kCC>   va{ai}, vb{bi};
     Value<float, Semantics::Native, kCC> vc{ci};
     wrapper[i] = static_cast<float>(fpsan::amdgcn_fdot2<false, Semantics::Native, kCC>(va, vb, vc));
-    Value<v2h, Semantics::FPSanLikeTriton, kCC>   vap{ai}, vbp{bi};
-    Value<float, Semantics::FPSanLikeTriton, kCC> vcp{ci};
+    Value<v2h, S, kCC>   vap{ai}, vbp{bi};
+    Value<float, S, kCC> vcp{ci};
     auto expanded = vcp + fpsan::cast<float>(vap.get(0)) * fpsan::cast<float>(vbp.get(0))
                     + fpsan::cast<float>(vap.get(1)) * fpsan::cast<float>(vbp.get(1));
     pay_direct[i] = expanded.fpsan_payload();
     pay_wrapper[i]
-        = fpsan::amdgcn_fdot2<false, Semantics::FPSanLikeTriton, kCC>(vap, vbp, vcp).fpsan_payload();
+        = fpsan::amdgcn_fdot2<false, S, kCC>(vap, vbp, vcp).fpsan_payload();
 }
 
 // ---- fdot2_f16_f16: v2h x v2h -> f16 ---------------------------------------
+template <Semantics S>
 __global__ void k_fdot2_f16_f16_pair(const v2h*      a,
                                      const v2h*      b,
                                      const _Float16* c,
@@ -201,15 +208,16 @@ __global__ void k_fdot2_f16_f16_pair(const v2h*      a,
     Value<_Float16, Semantics::Native, kCC> vc{ci};
     wrapper[i]
         = static_cast<_Float16>(fpsan::amdgcn_fdot2_f16_f16<Semantics::Native, kCC>(va, vb, vc));
-    Value<v2h, Semantics::FPSanLikeTriton, kCC>      vap{ai}, vbp{bi};
-    Value<_Float16, Semantics::FPSanLikeTriton, kCC> vcp{ci};
+    Value<v2h, S, kCC>      vap{ai}, vbp{bi};
+    Value<_Float16, S, kCC> vcp{ci};
     auto expanded  = vcp + vap.get(0) * vbp.get(0) + vap.get(1) * vbp.get(1);
     pay_direct[i]  = static_cast<std::uint16_t>(expanded.fpsan_payload());
     pay_wrapper[i] = static_cast<std::uint16_t>(
-        fpsan::amdgcn_fdot2_f16_f16<Semantics::FPSanLikeTriton, kCC>(vap, vbp, vcp).fpsan_payload());
+        fpsan::amdgcn_fdot2_f16_f16<S, kCC>(vap, vbp, vcp).fpsan_payload());
 }
 
 // ---- fdot2_f32_bf16: v2bf x v2bf -> f32 ------------------------------------
+template <Semantics S>
 __global__ void k_fdot2_f32_bf16_pair(const v2bf*    a,
                                       const v2bf*    b,
                                       const float*   c,
@@ -228,13 +236,13 @@ __global__ void k_fdot2_f32_bf16_pair(const v2bf*    a,
     Value<float, Semantics::Native, kCC> vc{ci};
     wrapper[i] = static_cast<float>(
         fpsan::amdgcn_fdot2_f32_bf16<false, Semantics::Native, kCC>(va, vb, vc));
-    Value<v2bf, Semantics::FPSanLikeTriton, kCC>  vap{ai}, vbp{bi};
-    Value<float, Semantics::FPSanLikeTriton, kCC> vcp{ci};
+    Value<v2bf, S, kCC>  vap{ai}, vbp{bi};
+    Value<float, S, kCC> vcp{ci};
     auto expanded = vcp + fpsan::cast<float>(vap.get(0)) * fpsan::cast<float>(vbp.get(0))
                     + fpsan::cast<float>(vap.get(1)) * fpsan::cast<float>(vbp.get(1));
     pay_direct[i] = expanded.fpsan_payload();
     pay_wrapper[i]
-        = fpsan::amdgcn_fdot2_f32_bf16<false, Semantics::FPSanLikeTriton, kCC>(vap, vbp, vcp).fpsan_payload();
+        = fpsan::amdgcn_fdot2_f32_bf16<false, S, kCC>(vap, vbp, vcp).fpsan_payload();
 }
 
 namespace
@@ -301,7 +309,8 @@ TEST(AmdgcnMath, fdot2_FloatAndFpsan)
     HIP_CHECK(hipMalloc(&dWrap, kFDot2N * sizeof(float)));
     HIP_CHECK(hipMalloc(&dPdir, kFDot2N * sizeof(std::uint32_t)));
     HIP_CHECK(hipMalloc(&dPwrap, kFDot2N * sizeof(std::uint32_t)));
-    k_fdot2_pair<<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+    k_fdot2_pair<decltype(sem)::value><<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         dir(kFDot2N), wrap(kFDot2N);
     std::vector<std::uint32_t> pdir(kFDot2N), pwrap(kFDot2N);
@@ -316,6 +325,7 @@ TEST(AmdgcnMath, fdot2_FloatAndFpsan)
         EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;
         EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
     }
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
@@ -340,7 +350,8 @@ TEST(AmdgcnMath, fdot2_f16_f16_FloatAndFpsan)
     HIP_CHECK(hipMalloc(&dWrap, kFDot2N * sizeof(_Float16)));
     HIP_CHECK(hipMalloc(&dPdir, kFDot2N * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dPwrap, kFDot2N * sizeof(std::uint16_t)));
-    k_fdot2_f16_f16_pair<<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+    k_fdot2_f16_f16_pair<decltype(sem)::value><<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<_Float16>      dir(kFDot2N), wrap(kFDot2N);
     std::vector<std::uint16_t> pdir(kFDot2N), pwrap(kFDot2N);
@@ -358,6 +369,7 @@ TEST(AmdgcnMath, fdot2_f16_f16_FloatAndFpsan)
         EXPECT_EQ(bw, bd) << "Float lane " << i;
         EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
     }
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
@@ -382,7 +394,8 @@ TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan)
     HIP_CHECK(hipMalloc(&dWrap, kFDot2N * sizeof(float)));
     HIP_CHECK(hipMalloc(&dPdir, kFDot2N * sizeof(std::uint32_t)));
     HIP_CHECK(hipMalloc(&dPwrap, kFDot2N * sizeof(std::uint32_t)));
-    k_fdot2_f32_bf16_pair<<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+    k_fdot2_f32_bf16_pair<decltype(sem)::value><<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         dir(kFDot2N), wrap(kFDot2N);
     std::vector<std::uint32_t> pdir(kFDot2N), pwrap(kFDot2N);
@@ -397,6 +410,7 @@ TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan)
         EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;
         EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
     }
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
@@ -417,6 +431,7 @@ using v4e4 = fpsan::v4e4m3_native;
 using v4e5 = fpsan::v4e5m2_native;
 
 #define DOT4_PAIR_KERNEL(NAME, AV, BV, BUILTIN)                                                  \
+    template <Semantics S>                                                                   \
     __global__ void k_##NAME##_pair(const unsigned* a,                                           \
                                     const unsigned* b,                                           \
                                     const float*    c,                                           \
@@ -435,14 +450,14 @@ using v4e5 = fpsan::v4e5m2_native;
         Value<BV, Semantics::Native, kCC>    bvF{bv};                                             \
         Value<float, Semantics::Native, kCC> cF{ci};                                              \
         wrapper[i] = static_cast<float>(fpsan::NAME<Semantics::Native, kCC>(avF, bvF, cF));       \
-        Value<AV, Semantics::FPSanLikeTriton, kCC>    avP{av};                                             \
-        Value<BV, Semantics::FPSanLikeTriton, kCC>    bvP{bv};                                             \
-        Value<float, Semantics::FPSanLikeTriton, kCC> cP{ci};                                              \
+        Value<AV, S, kCC>    avP{av};                                             \
+        Value<BV, S, kCC>    bvP{bv};                                             \
+        Value<float, S, kCC> cP{ci};                                              \
         auto expanded = cP;                                                                      \
         for(int k = 0; k < 4; ++k)                                                               \
             expanded = expanded + fpsan::cast<float>(avP.get(k)) * fpsan::cast<float>(bvP.get(k)); \
         pay_direct[i]  = expanded.fpsan_payload();                                               \
-        pay_wrapper[i] = fpsan::NAME<Semantics::FPSanLikeTriton, kCC>(avP, bvP, cP).fpsan_payload();       \
+        pay_wrapper[i] = fpsan::NAME<S, kCC>(avP, bvP, cP).fpsan_payload();       \
     }
 
 DOT4_PAIR_KERNEL(amdgcn_dot4_f32_fp8_fp8, v4e4, v4e4, __builtin_amdgcn_dot4_f32_fp8_fp8)
@@ -492,7 +507,8 @@ namespace
         HIP_CHECK(hipMalloc(&dWrap, kDot4N * sizeof(float)));                                    \
         HIP_CHECK(hipMalloc(&dPdir, kDot4N * sizeof(std::uint32_t)));                            \
         HIP_CHECK(hipMalloc(&dPwrap, kDot4N * sizeof(std::uint32_t)));                           \
-        k_##NAME##_pair<<<1, kDot4N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);                  \
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {                                     \
+        k_##NAME##_pair<decltype(sem)::value><<<1, kDot4N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);                  \
         HIP_CHECK(hipDeviceSynchronize());                                                       \
         std::vector<float>         dir(kDot4N), wrap(kDot4N);                                    \
         std::vector<std::uint32_t> pdir(kDot4N), pwrap(kDot4N);                                  \
@@ -507,6 +523,7 @@ namespace
             EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;                \
             EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                  \
         }                                                                                        \
+        });                                                                                      \
         (void)hipFree(dA);                                                                       \
         (void)hipFree(dB);                                                                       \
         (void)hipFree(dC);                                                                       \
