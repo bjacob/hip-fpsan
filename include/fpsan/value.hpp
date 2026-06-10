@@ -40,12 +40,12 @@ namespace fpsan
         // (see detail/algebraic.hpp). Field* are prime moduli (a field; no exp);
         // Exponentials* are CRT moduli carrying exp(a+b)=exp(a)exp(b) (and log);
         // Trigonometry* (p=4d+1) add sin/cos.
-        FPSanAlgebraic,
-        FPSanAlgebraic2,
-        FPSanAlgebraicExponentials,
-        FPSanAlgebraicExponentials2,
-        FPSanAlgebraicTrigonometry,
-        FPSanAlgebraicTrigonometry2,
+        FPSanAlgebraicField,
+        FPSanAlgebraicField2,
+        FPSanAlgebraicRingSophieGermain,
+        FPSanAlgebraicRingSophieGermain2,
+        FPSanAlgebraicRingPythagorean,
+        FPSanAlgebraicRingPythagorean2,
 
         // Deprecated former spellings, kept as value-preserving aliases so old
         // code still compiles (with a warning). Prefer the names above.
@@ -63,23 +63,23 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr bool is_algebraic_semantics(Semantics s)
         {
-            return s == Semantics::FPSanAlgebraic || s == Semantics::FPSanAlgebraic2
-                   || s == Semantics::FPSanAlgebraicExponentials
-                   || s == Semantics::FPSanAlgebraicExponentials2
-                   || s == Semantics::FPSanAlgebraicTrigonometry
-                   || s == Semantics::FPSanAlgebraicTrigonometry2;
+            return s == Semantics::FPSanAlgebraicField || s == Semantics::FPSanAlgebraicField2
+                   || s == Semantics::FPSanAlgebraicRingSophieGermain
+                   || s == Semantics::FPSanAlgebraicRingSophieGermain2
+                   || s == Semantics::FPSanAlgebraicRingPythagorean
+                   || s == Semantics::FPSanAlgebraicRingPythagorean2;
         }
         // Map the public Semantics onto the algebra-layer variant.
         FPSAN_HOST_DEVICE constexpr AlgVariant alg_variant_of(Semantics s)
         {
             switch(s)
             {
-            case Semantics::FPSanAlgebraic2: return AlgVariant::Field2;
-            case Semantics::FPSanAlgebraicExponentials: return AlgVariant::Exp1;
-            case Semantics::FPSanAlgebraicExponentials2: return AlgVariant::Exp2;
-            case Semantics::FPSanAlgebraicTrigonometry: return AlgVariant::Trig1;
-            case Semantics::FPSanAlgebraicTrigonometry2: return AlgVariant::Trig2;
-            default: return AlgVariant::Field1; // FPSanAlgebraic
+            case Semantics::FPSanAlgebraicField2: return AlgVariant::Field2;
+            case Semantics::FPSanAlgebraicRingSophieGermain: return AlgVariant::Exp1;
+            case Semantics::FPSanAlgebraicRingSophieGermain2: return AlgVariant::Exp2;
+            case Semantics::FPSanAlgebraicRingPythagorean: return AlgVariant::Trig1;
+            case Semantics::FPSanAlgebraicRingPythagorean2: return AlgVariant::Trig2;
+            default: return AlgVariant::Field1; // FPSanAlgebraicField
             }
         }
     } // namespace detail

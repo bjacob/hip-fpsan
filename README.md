@@ -71,11 +71,20 @@ FPSan payloads; see the blog post linked above for the why.
 `Z/2^w`), the library also carries a research family of *value-model* semantics
 whose payload is the genuine residue `phi_n(value)` in `Z/nZ`, so they honor
 *all* rational-function identities (`2+2 == 4`, `x/x == 1`, …), not just the ring
-axioms: `Semantics::FPSanAlgebraic` (prime modulus — a field),
-`FPSanAlgebraicExponentials` (composite `n = p·d`, adding exact
-`exp`/`exp2`/`log`/`log2` homomorphisms), and `FPSanAlgebraicTrigonometry`
-(`p = 4d+1`, adding `sin`/`cos`) — each with an independent-prime twin suffixed
-`2` (e.g. `FPSanAlgebraic2`), for catching coincidental collisions on a re-run.
+axioms: `Semantics::FPSanAlgebraicField` (prime modulus `n = p` — the only
+variant that is a genuine *field*, so division `x/x == 1` holds for every
+nonzero value), `FPSanAlgebraicRingSophieGermain` (composite modulus `n = p·d`
+with `p = 2d+1`, adding exact `exp`/`exp2`/`log`/`log2` homomorphisms), and
+`FPSanAlgebraicRingPythagorean` (composite `n = p·d` with `p = 4d+1`, adding
+`sin`/`cos`) — each with an independent-prime twin suffixed `2`
+(e.g. `FPSanAlgebraicField2`), for catching coincidental collisions on a re-run.
+The two composite variants are **rings, not fields**: their names invoke
+classes of *primes* (`p` Sophie Germain / safe, `p` Pythagorean i.e. `≡ 1 mod
+4`), but the modulus `n = p·d` is the *product* of two primes — so they carry
+zero divisors and division is only the field's exact inverse on a unit. The
+prime moniker names the structure of `p` (and the channel it unlocks: the
+order-`d` exp/log subgroup, and for Pythagorean the `√−1` that powers
+rotation), not a claim that the whole ring is a field.
 Note these variants promote `log`/`log2` to
 genuine homomorphisms (the exact inverses of `exp`/`exp2`), where the free
 `FPSanLikeTriton`/Triton model keeps them as tagged tokens. They flow through

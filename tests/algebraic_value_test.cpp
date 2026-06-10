@@ -35,7 +35,7 @@ static V mac(const float* a, const float* b, int n, const int* order)
 
 int main()
 {
-    using Alg   = F<Semantics::FPSanAlgebraic>;
+    using Alg   = F<Semantics::FPSanAlgebraicField>;
     using Scr   = F<Semantics::FPSanLikeTriton>; // Triton-style free model
 
     // ---- algebraic = value model: rational identities hold within a width ----
@@ -62,11 +62,11 @@ int main()
     check((Scr{2.0f} + Scr{2.0f}) != Scr{4.0f}, "fpsan free model: 2+2 != 4");
 
     // ---- a second prime variant is independent but obeys the same identities -
-    using Alg2 = F<Semantics::FPSanAlgebraic2>;
+    using Alg2 = F<Semantics::FPSanAlgebraicField2>;
     check((Alg2{2.0f} + Alg2{2.0f}) == Alg2{4.0f}, "alg2: 2+2 == 4");
 
     // ---- the Exponentials variant honors exp(a+b) == exp(a)*exp(b) ----
-    using Exp = F<Semantics::FPSanAlgebraicExponentials>;
+    using Exp = F<Semantics::FPSanAlgebraicRingSophieGermain>;
     check(exp(Exp{0.0f}) == Exp{1.0f}, "exp: exp(0) == 1");
     {
         long ok = 0, n = 0;
@@ -85,7 +85,7 @@ int main()
           "field: exp is NOT a homomorphism (tagged token)");
 
     // Exp2 is an independent variant: its own exp homomorphism, distinct modulus.
-    using Exp2 = F<Semantics::FPSanAlgebraicExponentials2>;
+    using Exp2 = F<Semantics::FPSanAlgebraicRingSophieGermain2>;
     check(exp(Exp2{1.5f} + Exp2{2.5f}) == exp(Exp2{1.5f}) * exp(Exp2{2.5f}),
           "exp2-variant: exp(a+b)==exp(a)*exp(b)");
     // 0.5 -> (n+1)/2 differs between the two moduli (small integers wouldn't).
@@ -113,7 +113,7 @@ int main()
           "field: log is NOT a homomorphism (tagged token)");
 
     // ---- Trigonometry variant: genuine sin/cos angle-addition (order-d rotation)
-    using Trig = F<Semantics::FPSanAlgebraicTrigonometry>;
+    using Trig = F<Semantics::FPSanAlgebraicRingPythagorean>;
     check(cos(Trig{0.0f}) == Trig{1.0f}, "trig: cos(0) == 1");
     check(sin(Trig{0.0f}) == Trig{0.0f}, "trig: sin(0) == 0");
     {
@@ -286,9 +286,9 @@ int main()
     // The fp4|fp8|fp16|fp32 primes are a coprime tower, so every widening and
     // narrowing cast is multiplicative, they compose, and narrow(widen(x)) == x.
     {
-        using F8  = Value<fp8_e4m3, Semantics::FPSanAlgebraic, Conversions::Explicit>;
-        using F16 = Value<_Float16, Semantics::FPSanAlgebraic, Conversions::Explicit>;
-        using F32 = Value<float, Semantics::FPSanAlgebraic, Conversions::Explicit>;
+        using F8  = Value<fp8_e4m3, Semantics::FPSanAlgebraicField, Conversions::Explicit>;
+        using F16 = Value<_Float16, Semantics::FPSanAlgebraicField, Conversions::Explicit>;
+        using F32 = Value<float, Semantics::FPSanAlgebraicField, Conversions::Explicit>;
         long  w16 = 0, w32 = 0, nA = 0, rt = 0, n = 0;
         float xs[] = {1.f, 2.f, 3.f, 0.5f, 4.f, 6.f, 1.5f, 0.25f};
         for(float u : xs)
@@ -359,7 +359,7 @@ int main()
     // ---- cast: same-width is identity; cross-width is deterministic ----
     check(cast<float>(Alg{1.25f}) == Alg{1.25f}, "alg: same-width cast is identity");
     {
-        using H = Value<_Float16, Semantics::FPSanAlgebraic, Conversions::Explicit>;
+        using H = Value<_Float16, Semantics::FPSanAlgebraicField, Conversions::Explicit>;
         H h1 = cast<_Float16>(Alg{1.5f});
         H h2 = cast<_Float16>(Alg{1.5f});
         check(h1 == h2, "alg: cross-width cast is deterministic");

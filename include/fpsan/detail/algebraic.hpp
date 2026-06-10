@@ -15,7 +15,7 @@
 // This header is the ONE place the variants diverge.  Four variants:
 //   * Field1 / Field2 : n = a prime just below 2^w.  Z/n is a field
 //                       (division total, x/x == 1).  No exp homomorphism.
-//   * Exp1   / Exp2   : n = p*d (Sophie-Germain pair, p == 2d+1), p,d prime.
+//   * Exp1   / Exp2   : n = p*d (Sophie Germain pair, p == 2d+1), p,d prime.
 //                       Carries exp(v) = g^(v mod d) so exp(a+b)=exp(a)exp(b);
 //                       pays zero-divisors (~1/p+1/d) and an order-d exp image.
 //
@@ -80,7 +80,7 @@ namespace fpsan
         // widening composes, narrowing composes, and narrow(widen(x)) == x exactly
         // (see alg_cast1). Variant 1 and 2 are two independent towers sharing only
         // fp4 = 11 (the only 11-mod-12 prime that fits 4 bits). Exp pairs are
-        // Sophie-Germain (p = 2d+1); g has order d in (Z/n)^*.  64-bit (double) is
+        // Sophie Germain (p = 2d+1); g has order d in (Z/n)^*.  64-bit (double) is
         // not wired yet (needs 128-bit modular multiply); it static_asserts below.
         FPSAN_HOST_DEVICE constexpr u64 alg_field_prime(AlgVariant v, unsigned w)
         {
@@ -140,7 +140,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr AlgModulus alg_exp_pair(AlgVariant v, unsigned w)
         {
-            // Two independent Sophie-Germain pairs (p = 2d+1) per width; g has
+            // Two independent Sophie Germain pairs (p = 2d+1) per width; g has
             // order d in (Z/n)^*. Exp1 uses the largest pair, Exp2 the next --
             // distinct moduli so the two variants are genuinely independent runs.
             const bool e1 = (v == AlgVariant::Exp1);
@@ -624,7 +624,7 @@ namespace fpsan
         // of p, since n=p*d), which is closed under mod-n addition and isomorphic
         // to Z/d -- so log(x*y) = log(x)+log(y) holds EXACTLY in Z/n. Concretely
         //   log(r) = (n/d) * dlog_g( (r mod p)^(d+1) )     in [0, n)
-        // where (r mod p)^(d+1) is r's order-d component (the SG projection, since
+        // where (r mod p)^(d+1) is r's order-d component (the Sophie Germain projection, since
         // (p-1)/d = 2) and dlog is its discrete log base g. Only the Exp (CRT)
         // variants have the d-channel; the Field variants fall back to a tagged
         // token. Undefined at a true zero (-> Inf pole) and where the value
