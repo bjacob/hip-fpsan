@@ -23,6 +23,8 @@
 #include "fpsan/amdgcn_global_load.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
+
 #include <hip/hip_runtime.h>
 
 #include <gtest/gtest.h>
@@ -155,12 +157,14 @@ TEST(GlobalLoadTr, F16_MatchesBuiltinAndFpsanMovesSameBits)
         GTEST_SKIP() << "no HIP device";
     auto raw = run(k_loadtr_raw_f16);
     auto flt = run(k_loadtr_wrap_f16<Semantics::Native>);
-    auto fps = run(k_loadtr_wrap_f16<Semantics::FPSanLikeTriton>);
     for(size_t i = 0; i < raw.size(); ++i)
-    {
         EXPECT_EQ(flt[i], raw[i]) << "Float wrapper != builtin at " << i;
-        EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
-    }
+    // Every FPSan-family semantics moves the same bits as the builtin.
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        auto fps = run(k_loadtr_wrap_f16<decltype(sem)::value>);
+        for(size_t i = 0; i < raw.size(); ++i)
+            EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
+    });
 }
 
 TEST(GlobalLoadTr, BF16_MatchesBuiltinAndFpsanMovesSameBits)
@@ -169,10 +173,11 @@ TEST(GlobalLoadTr, BF16_MatchesBuiltinAndFpsanMovesSameBits)
         GTEST_SKIP() << "no HIP device";
     auto raw = run(k_loadtr_raw_bf16);
     auto flt = run(k_loadtr_wrap_bf16<Semantics::Native>);
-    auto fps = run(k_loadtr_wrap_bf16<Semantics::FPSanLikeTriton>);
     for(size_t i = 0; i < raw.size(); ++i)
-    {
         EXPECT_EQ(flt[i], raw[i]) << "Float wrapper != builtin at " << i;
-        EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        auto fps = run(k_loadtr_wrap_bf16<decltype(sem)::value>);
+        for(size_t i = 0; i < raw.size(); ++i)
+            EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
+    });
 }
