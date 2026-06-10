@@ -656,12 +656,14 @@ namespace fpsan
         }
 
         // Discrete log in F_q of x to base b, where b has order m (the answer is in
-        // [0, m)). Brute force O(m) for the small group orders (fp4/fp8: <= ~190;
-        // the fp16<->fp32 edge pays O(2^16), tolerable); Pohlig-Hellman once m is
-        // large (the fp32<->fp64 cast, m = p_32-1 ~ 2^32). Same unique result.
+        // [0, m)). Brute force O(m) for tiny group orders (fp4/fp8: <= ~190);
+        // Pohlig-Hellman once m is larger (fp16's ~65k and the fp32<->fp64 cast's
+        // ~2^32), since every Field p-1 is smooth by construction. Same unique
+        // result either way; PH turns the fp16/fp32 cast dlogs from O(m) into a few
+        // dozen / few thousand steps.
         FPSAN_HOST_DEVICE constexpr u64 alg_dlog_base(u64 x, u64 b, u64 m, u64 q)
         {
-            if(m > (u64{1} << 20))
+            if(m > (u64{1} << 10))
                 return alg_dlog_ph(x, b, m, q);
             u64 cur = 1 % q;
             for(u64 k = 0; k < m; ++k)
