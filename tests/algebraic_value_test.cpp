@@ -5,6 +5,7 @@
 //   c++ -std=c++17 -I include tests/algebraic_value_test.cpp -o /tmp/algv && /tmp/algv
 // ----------------------------------------------------------------------------
 #include "fpsan/cast.hpp"
+#include "fpsan/detail/fp8.hpp"
 #include "fpsan/math.hpp"
 #include "fpsan/value.hpp"
 
@@ -252,6 +253,49 @@ int main()
     // contrast: the free model's sqrt is a tagged token (not multiplicative)
     check(sqrt(Scr{2.0f} * Scr{3.0f}) != sqrt(Scr{2.0f}) * sqrt(Scr{3.0f}),
           "fpsan free model: sqrt is a token (not multiplicative)");
+
+    // ---- Field casts form a commutative diagram of homomorphisms ----
+    // The fp4|fp8|fp16|fp32 primes are a coprime tower, so every widening and
+    // narrowing cast is multiplicative, they compose, and narrow(widen(x)) == x.
+    {
+        using F8  = Value<fp8_e4m3, Semantics::FPSanAlgebraic, Conversions::Explicit>;
+        using F16 = Value<_Float16, Semantics::FPSanAlgebraic, Conversions::Explicit>;
+        using F32 = Value<float, Semantics::FPSanAlgebraic, Conversions::Explicit>;
+        long  w16 = 0, w32 = 0, nA = 0, rt = 0, n = 0;
+        float xs[] = {1.f, 2.f, 3.f, 0.5f, 4.f, 6.f, 1.5f, 0.25f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                F8  a{static_cast<fp8_e4m3>(u)}, b{static_cast<fp8_e4m3>(v)};
+                F32 c{u}, d{v};
+                // widening is multiplicative (fp8 -> fp16, fp8 -> fp32)
+                w16 += (cast<_Float16>(a * b) == cast<_Float16>(a) * cast<_Float16>(b));
+                w32 += (cast<float>(a * b) == cast<float>(a) * cast<float>(b));
+                // narrowing is multiplicative (fp32 -> fp8)
+                nA += (cast<fp8_e4m3>(c * d) == cast<fp8_e4m3>(c) * cast<fp8_e4m3>(d));
+                // up-then-down round trip recovers the original (narrow . widen == id)
+                rt += (cast<fp8_e4m3>(cast<float>(a)) == a);
+                ++n;
+            }
+        check(w16 == n, "field cast fp8->fp16: multiplicative (cast(x*y)==cast(x)*cast(y))");
+        check(w32 == n, "field cast fp8->fp32: multiplicative");
+        check(nA == n, "field cast fp32->fp8: narrowing is multiplicative");
+        check(rt == n, "field cast: narrow(widen(x)) == x (round-trip identity)");
+        // commutative diagram: widen direct == widen via an intermediate width
+        {
+            long ok = 0, m = 0;
+            for(float u : xs)
+            {
+                F8 a{static_cast<fp8_e4m3>(u)};
+                ok += (cast<float>(a) == cast<float>(cast<_Float16>(a))); // fp8->fp32 == fp8->fp16->fp32
+                ++m;
+            }
+            check(ok == m, "field cast: fp8->fp32 == fp8->fp16->fp32 (widening composes)");
+        }
+        check(cast<_Float16>(F8{static_cast<fp8_e4m3>(1.0f)}) == F16{static_cast<_Float16>(1.0f)},
+              "field cast fp8->fp16: cast(1) == 1");
+        check(cast<float>(Alg{1.25f}) == Alg{1.25f}, "field cast: same-width is identity");
+    }
 
     // ---- Inf / NaN reach the payload, via 1/0 ----
     check(((Alg{1.0f} / Alg{0.0f}) / (Alg{1.0f} / Alg{0.0f})) == (Alg{1.0f} / Alg{0.0f}) /

@@ -73,10 +73,12 @@ namespace fpsan
         // p == 11 (mod 12), which gives two algebraic structures for free:
         //   * sqrt as a multiplicative map with 1/2 round-trip coverage (p==3 mod 4)
         //   * cbrt as a PERFECT multiplicative cube root (3 coprime to p-1, p==2 mod 3)
-        // and, across widths, p_w - 1 forms a divisibility chain
-        //   fp4(10) | fp8 | fp16 | fp32   (fp6 is standalone)
-        // so widening casts fp4/fp8/fp16 -> wider are multiplicative homomorphisms
-        // (see alg_cast1). Variant 1 and 2 are two independent chains sharing only
+        // and, across widths, the p_w - 1 form a COPRIME TOWER
+        //   fp4(10) | fp8 | fp16 | fp32,  each step's cofactor coprime to the rest
+        // (fp6 is standalone). That makes every widening AND narrowing cast in the
+        // chain a multiplicative homomorphism, and makes them a commutative diagram:
+        // widening composes, narrowing composes, and narrow(widen(x)) == x exactly
+        // (see alg_cast1). Variant 1 and 2 are two independent towers sharing only
         // fp4 = 11 (the only 11-mod-12 prime that fits 4 bits). Exp pairs are
         // Sophie-Germain (p = 2d+1); g has order d in (Z/n)^*.  64-bit (double) is
         // not wired yet (needs 128-bit modular multiply); it static_asserts below.
@@ -88,9 +90,26 @@ namespace fpsan
             {
             case 4: return 11u; // shared: only 11-mod-12 prime that fits 4 bits
             case 6: return a ? 59u : 47u; // standalone (not in the cast chain)
-            case 8: return a ? 191u : 251u;
-            case 16: return a ? 65171u : 61751u;
-            case 32: return a ? 4293073751u : 4290451751u;
+            case 8: return a ? 191u : 131u;
+            case 16: return a ? 65171u : 64871u;
+            case 32: return a ? 4284862331u : 4291215371u;
+            default: return 0;
+            }
+        }
+        // A primitive root (generator of F_p^*) for each Field prime, used to build
+        // the multiplicative widening cast (alg_cast1): the cast sends g_narrow to a
+        // generator of the order-(p_narrow-1) subgroup of F_p_wide^*.
+        FPSAN_HOST_DEVICE constexpr u64 alg_field_root(AlgVariant v, unsigned w)
+        {
+            const bool a = (v == AlgVariant::Field1 || v == AlgVariant::Exp1
+                            || v == AlgVariant::Trig1);
+            switch(w)
+            {
+            case 4: return 2u;           // p=11
+            case 6: return a ? 2u : 5u;  // 59 -> 2, 47 -> 5
+            case 8: return a ? 19u : 2u; // 191 -> 19, 131 -> 2
+            case 16: return a ? 2u : 7u; // 65171 -> 2, 64871 -> 7
+            case 32: return 2u;          // 4284862331 -> 2, 4291215371 -> 2
             default: return 0;
             }
         }
@@ -148,7 +167,8 @@ namespace fpsan
             if(is_trig && w >= 8)
                 return alg_trig_pair(v, w);
             // Field variant, or exp/trig below 8 bits -> field prime, no exp/trig.
-            return {alg_field_prime(v, w), 0u, 0u, false};
+            // g carries a primitive root of the prime (for the multiplicative cast).
+            return {alg_field_prime(v, w), alg_field_root(v, w), 0u, false};
         }
 
         FPSAN_HOST_DEVICE constexpr u64 alg_gcd(u64 a, u64 b)
@@ -536,16 +556,65 @@ namespace fpsan
             return acc;
         }
 
-        // Cast convention between widths (NON-faithful by construction -- a
-        // per-width modulus makes widening uncomputable; see algebraic-fpsan.md).
-        // Deterministic and in-range: Inf/NaN map across, a finite residue maps
-        // by reduction mod the destination modulus (identity for same width).
+        // Discrete log in F_q of x to base b, where b has order m (the answer is in
+        // [0, m)). Brute force, O(m) -- cheap when m is the SMALL prime's group order
+        // (fp4/fp8: <= ~190; the fp16<->fp32 edge pays O(2^16), tolerable for a
+        // sanitizer, and is the only place a BSGS upgrade would help).
+        FPSAN_HOST_DEVICE constexpr u64 alg_dlog_base(u64 x, u64 b, u64 m, u64 q)
+        {
+            u64 cur = 1 % q;
+            for(u64 k = 0; k < m; ++k)
+            {
+                if(cur == x)
+                    return k;
+                cur = (cur * b) % q;
+            }
+            return 0; // unreachable when x is in <b>
+        }
+
+        // Cast between widths. A value-FAITHFUL cast is impossible across coprime
+        // per-width primes (the narrow residue can't determine the wide one; see
+        // algebraic-fpsan.md). But a *multiplicative* cast is, and because the Field
+        // primes form a COPRIME TOWER (p_narrow-1 | p_wide-1 with coprime cofactor),
+        // widening and narrowing form a commutative diagram in log coordinates
+        // L_p(x) = dlog_{g_p}(x):
+        //   * widen  (narrow N -> wide W):  L_W = CRT-section of L_N -- the lift that
+        //     is L_N mod (p_N-1) and 0 mod the cofactor. So cast(x) = h^{L_N(x)} with
+        //     h = g_W^{(s*s^{-1} mod (p_N-1)) mod (p_W-1)}, s = (p_W-1)/(p_N-1).
+        //   * narrow (wide W -> narrow N):  L_N = L_W mod (p_N-1) -- the quotient.
+        //     Computed cheaply as a dlog over the order-(p_N-1) subgroup.
+        // Then widening composes, narrowing composes, and narrow(widen(x)) == x. Both
+        // directions satisfy cast(x*y)==cast(x)*cast(y) and cast(0)==0. Off the chain
+        // (Exp/Trig composite moduli, fp6, or non-chain pairs) and at equal width it
+        // is the plain reduce-mod convention (identity at same width). Inf/NaN map
+        // across.
         FPSAN_HOST_DEVICE constexpr u64 alg_cast1(const AlgConfig& from, const AlgConfig& to, u64 p)
         {
             if(from.has_inf_nan && p == from.inf_code)
                 return to.inf_code;
             if(from.has_inf_nan && p == from.nan_code)
                 return to.nan_code;
+            if(p == 0)
+                return 0;
+            const bool field = !from.two_moduli && !to.two_moduli && from.g != 0 && to.g != 0;
+            if(field && to.n > from.n && (to.n - 1) % (from.n - 1) == 0)
+            {
+                // widen N=from -> W=to
+                const u64 s    = (to.n - 1) / (from.n - 1);
+                const u64 sinv = alg_inv(s % (from.n - 1), from.n - 1); // coprime tower => exists
+                const u64 h    = alg_powmod(to.g, (s * sinv) % (to.n - 1), to.n);
+                const u64 k    = alg_dlog_base(p, from.g, from.n - 1, from.n);
+                return alg_powmod(h, k, to.n);
+            }
+            if(field && to.n < from.n && (from.n - 1) % (to.n - 1) == 0)
+            {
+                // narrow W=from -> N=to
+                const u64 s    = (from.n - 1) / (to.n - 1);
+                const u64 H    = alg_powmod(from.g, s, from.n);   // order p_N-1 in F_W
+                const u64 proj = alg_powmod(p, s, from.n);        // project onto that subgroup
+                const u64 k    = alg_dlog_base(proj, H, to.n - 1, from.n);
+                return alg_powmod(to.g, k, to.n);
+            }
             return p % to.n;
         }
 
