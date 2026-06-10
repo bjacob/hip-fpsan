@@ -365,6 +365,76 @@ int main()
         check(h1 == h2, "alg: cross-width cast is deterministic");
     }
 
+    // ---- 64-bit element types (double): the full algebra at n ~ 2^64 ----------
+    // Exercises the 128-bit modular multiply, the overflow-safe modular add, the
+    // overflow-free cbrt exponent, and -- for log/log2/log10 on the d ~ 2^31
+    // channel -- the Pollard-rho discrete log.
+    {
+        using DFld = Value<double, Semantics::FPSanAlgebraicField, Conversions::Explicit>;
+        check((DFld{2.0} + DFld{2.0}) == DFld{4.0}, "dbl field: 2+2 == 4");
+        check((DFld{3.0} * DFld{3.0}) == DFld{9.0}, "dbl field: 3*3 == 9");
+        {
+            long ok = 0, n = 0;
+            for(int i = 1; i <= 400; ++i, ++n)
+                ok += ((DFld{(double)i} / DFld{(double)i}) == DFld{1.0});
+            check(ok == n, "dbl field: x/x == 1");
+        }
+        check(sqrt(DFld{3.0} * DFld{5.0}) == sqrt(DFld{3.0}) * sqrt(DFld{5.0}),
+              "dbl field: sqrt(x*y) == sqrt(x)*sqrt(y)");
+        {
+            DFld x{7.0}, c = cbrt(x);
+            check(c * c * c == x, "dbl field: cbrt(x)^3 == x (perfect)");
+        }
+
+        using DExp = Value<double, Semantics::FPSanAlgebraicRingSophieGermain, Conversions::Explicit>;
+        check(exp(DExp{0.0}) == DExp{1.0}, "dbl SG: exp(0) == 1");
+        {
+            long  ok = 0, n = 0;
+            double xs[] = {0.5, 1.0, 1.5, 2.0, -1.0, 0.25, 3.0};
+            for(double u : xs)
+                for(double v : xs) { ok += (exp(DExp{u} + DExp{v}) == exp(DExp{u}) * exp(DExp{v})); ++n; }
+            check(ok == n, "dbl SG: exp(a+b) == exp(a)*exp(b)");
+        }
+        {
+            long  ok = 0, n = 0;
+            double xs[] = {1.0, 2.0, 3.0, 5.0, 0.5, 1.5, 7.0};
+            for(double u : xs)
+                for(double v : xs) { ok += (log(DExp{u} * DExp{v}) == log(DExp{u}) + log(DExp{v})); ++n; }
+            check(ok == n, "dbl SG: log(x*y) == log(x)+log(y) (Pollard-rho dlog)");
+        }
+        check(exp(log(exp(DExp{1.5}))) == exp(DExp{1.5}), "dbl SG: exp(log(exp v)) == exp v");
+        check(exp2(DExp{2.0}) != exp(DExp{2.0}), "dbl SG: exp2 != exp (distinct base)");
+        check(exp10(log10(exp10(DExp{1.5}))) == exp10(DExp{1.5}), "dbl SG: exp10(log10(exp10 v))");
+
+        using DTrig = Value<double, Semantics::FPSanAlgebraicRingPythagorean, Conversions::Explicit>;
+        check(cos(DTrig{0.0}) == DTrig{1.0}, "dbl Pyth: cos(0) == 1");
+        check(sin(DTrig{0.0}) == DTrig{0.0}, "dbl Pyth: sin(0) == 0");
+        {
+            long  ok = 0, n = 0;
+            double xs[] = {0.5, 1.0, 1.5, 2.0, 3.0, -1.0, 0.25};
+            for(double u : xs)
+                for(double v : xs)
+                {
+                    bool c1 = (cos(DTrig{u} + DTrig{v})
+                               == cos(DTrig{u}) * cos(DTrig{v}) - sin(DTrig{u}) * sin(DTrig{v}));
+                    bool c2 = (sin(DTrig{u} + DTrig{v})
+                               == sin(DTrig{u}) * cos(DTrig{v}) + cos(DTrig{u}) * sin(DTrig{v}));
+                    ok += (c1 && c2);
+                    ++n;
+                }
+            check(ok == n, "dbl Pyth: sin/cos angle-addition");
+        }
+        check(cos(DTrig{1.3}) * cos(DTrig{1.3}) + sin(DTrig{1.3}) * sin(DTrig{1.3}) == DTrig{1.0},
+              "dbl Pyth: cos^2 + sin^2 == 1");
+        check(log(DTrig{2.0} * DTrig{3.0}) == log(DTrig{2.0}) + log(DTrig{3.0}),
+              "dbl Pyth: log homomorphism still holds");
+        // independent-prime twins also work at 64 bits
+        using DFld2 = Value<double, Semantics::FPSanAlgebraicField2, Conversions::Explicit>;
+        check((DFld2{2.0} + DFld2{2.0}) == DFld2{4.0}, "dbl field2: 2+2 == 4");
+        check(DFld{0.5}.fpsan_payload() != DFld2{0.5}.fpsan_payload(),
+              "dbl field/field2 use distinct moduli");
+    }
+
     std::printf("passed %ld, failed %ld\n", pass, fail);
     return fail == 0 ? 0 : 1;
 }

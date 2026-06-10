@@ -40,7 +40,8 @@ namespace fpsan
 {
     namespace detail
     {
-        using u64 = std::uint64_t;
+        using u64  = std::uint64_t;
+        using u128 = unsigned __int128;
 
         // The divergence point: which algebraic variant. (Mapped from the public
         // Semantics enum in value.hpp; kept separate so this header has no
@@ -81,7 +82,11 @@ namespace fpsan
         // (see alg_cast1). Variant 1 and 2 are two independent towers sharing only
         // fp4 = 11 (the only 11-mod-12 prime that fits 4 bits). Exp pairs are
         // Sophie Germain (p = 2d+1); g has order d in (Z/n)^*.  64-bit (double) is
-        // not wired yet (needs 128-bit modular multiply); it static_asserts below.
+        // supported via 128-bit modular multiply (alg_mulmod); its Field prime sits
+        // just below 2^64 but is OFF the cast tower (like fp6) -- a multiplicative
+        // double<->narrow cast would need a discrete log over the ~2^32-order fp32
+        // unit group, disproportionate for a non-hot-path; double casts use the
+        // plain reduce-mod convention. All other invariants hold at 64 bits.
         FPSAN_HOST_DEVICE constexpr u64 alg_field_prime(AlgVariant v, unsigned w)
         {
             const bool a = (v == AlgVariant::Field1 || v == AlgVariant::Exp1
@@ -93,6 +98,9 @@ namespace fpsan
             case 8: return a ? 191u : 131u;
             case 16: return a ? 65171u : 64871u;
             case 32: return a ? 4284862331u : 4291215371u;
+            // 64-bit: largest 11-mod-12 primes below 2^64 (off the cast tower).
+            case 64:
+                return a ? 18446744073709551359ull : 18446744073709551263ull;
             default: return 0;
             }
         }
@@ -110,6 +118,7 @@ namespace fpsan
             case 8: return a ? 19u : 2u; // 191 -> 19, 131 -> 2
             case 16: return a ? 2u : 7u; // 65171 -> 2, 64871 -> 7
             case 32: return 2u;          // 4284862331 -> 2, 4291215371 -> 2
+            case 64: return a ? 7u : 5u; // primitive roots of the two 64-bit primes
             default: return 0;
             }
         }
@@ -135,6 +144,15 @@ namespace fpsan
                                        2323668815u, true}
                           : AlgModulus{4263339083u, 4261380264u, 32647u, true, 2663668731u,
                                        1327688196u, true};
+            case 64:
+                // p = 4d+1, d == 3 (mod 4) so the r^(d+1) log projection lands in <g>;
+                // omega is the order-d rotor in (Z/n)[i] (identity in the F_d factor).
+                return t1 ? AlgModulus{18446733956915472983ull, 18446733828066489444ull,
+                                       2147483059ull, true, 11529208662674209581ull,
+                                       9560073116094198325ull, true}
+                          : AlgModulus{18446693549896360103ull, 18446693421047517684ull,
+                                       2147480707ull, true, 11529183408287330181ull,
+                                       8946606739803700719ull, true};
             default: return {};
             }
         }
@@ -154,6 +172,13 @@ namespace fpsan
             case 32:
                 return e1 ? AlgModulus{4274287111u, 4274009738u, 46229u, true}
                           : AlgModulus{4268741401u, 4268464208u, 46199u, true};
+            case 64:
+                // p = 2d+1 (Sophie Germain), d == 2 (mod 3) so 3 stays coprime to the
+                // group exponent and cbrt remains a perfect power map. g has order d.
+                return e1 ? AlgModulus{18446739472945029403ull, 18446739454723028678ull,
+                                       3037000121ull, true}
+                          : AlgModulus{18446728393970250571ull, 18446728375748255318ull,
+                                       3036999209ull, true};
             default: return {};
             }
         }
@@ -210,9 +235,9 @@ namespace fpsan
         FPSAN_HOST_DEVICE constexpr AlgConfig make_alg_config(AlgVariant v)
         {
             using T = fp_traits<ElementType>;
-            static_assert(T::bit_width <= 32,
-                          "fpsan algebraic: 64-bit element types not wired yet "
-                          "(needs 128-bit modular multiply).");
+            static_assert(T::bit_width <= 64,
+                          "fpsan algebraic: element types wider than 64 bits are "
+                          "not supported.");
             AlgConfig c;
             const AlgModulus m = alg_modulus(v, T::bit_width);
             c.n           = m.n;
@@ -242,11 +267,35 @@ namespace fpsan
             c.sqrt_exp  = (lam_odd + 1) / 2; // 2^{-1} mod (odd part): best sqrt coverage
             c.rsqrt_exp = lam - c.sqrt_exp;  // x^rsqrt_exp == sqrt(x)^{-1} on units
             c.has_cbrt  = (lam % 3 != 0);    // 3 invertible mod lam -> perfect cbrt
-            c.cbrt_exp  = !c.has_cbrt ? 0 : (lam % 3 == 1 ? (1 + 2 * lam) / 3 : (1 + lam) / 3);
+            // 3^{-1} mod lam, written to avoid overflow at lam ~ 2^64: for lam == 1
+            // (mod 3) the textbook (2*lam+1)/3 would overflow, so use the equal
+            // value 2*((lam-1)/3) + 1; for lam == 2 (mod 3), (lam+1)/3 fits (lam+1 = n).
+            c.cbrt_exp  = !c.has_cbrt ? 0
+                          : (lam % 3 == 1 ? 2 * ((lam - 1) / 3) + 1 : (lam + 1) / 3);
             return c;
         }
 
-        // ---- scalar modular arithmetic (n < 2^32, so products fit u64) ----------
+        // ---- scalar modular arithmetic -------------------------------------------
+        // Modular multiply through a 128-bit intermediate, so it is correct for
+        // moduli all the way up to ~2^64 (64-bit element types), not just n < 2^32
+        // where a u64 product sufficed.
+        FPSAN_HOST_DEVICE constexpr u64 alg_mulmod(u64 a, u64 b, u64 n)
+        {
+            return (u64)(((u128)a * (u128)b) % n);
+        }
+        // Overflow-safe modular add/sub for moduli up to ~2^64. At 64 bits a + b can
+        // exceed 2^64, so a u64 wrap (s < a) must be handled like the s >= n case --
+        // s - n then yields the correct residue modulo 2^64. (For n < 2^32, as in the
+        // narrower widths, the wrap never happens and this matches the old s>=n form.)
+        FPSAN_HOST_DEVICE constexpr u64 alg_addmod(u64 a, u64 b, u64 n)
+        {
+            u64 s = a + b;
+            return (s < a || s >= n) ? s - n : s;
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_submod(u64 a, u64 b, u64 n)
+        {
+            return (a >= b) ? (a - b) : (n - (b - a)); // a, b in [0, n): no overflow
+        }
         FPSAN_HOST_DEVICE constexpr u64 alg_powmod(u64 b, u64 e, u64 n)
         {
             u64 r = 1 % n;
@@ -254,28 +303,31 @@ namespace fpsan
             while(e)
             {
                 if(e & 1)
-                    r = (r * b) % n;
-                b = (b * b) % n;
+                    r = alg_mulmod(r, b, n);
+                b = alg_mulmod(b, b, n);
                 e >>= 1;
             }
             return r;
         }
         // Returns the inverse, or n (an out-of-range sentinel) if a is a non-unit.
+        // Remainders stay in u64 (< n <= ~2^64); the Bezout coefficients are kept in
+        // a signed 128-bit type so this is exact for moduli up to ~2^64 -- the old
+        // int64 coefficients overflowed once n exceeded 2^63.
         FPSAN_HOST_DEVICE constexpr u64 alg_inv(u64 a, u64 n)
         {
-            std::int64_t t = 0, newt = 1;
-            std::int64_t r = (std::int64_t)n, newr = (std::int64_t)(a % n);
+            __int128 t = 0, newt = 1;
+            u64      r = n, newr = a % n;
             while(newr != 0)
             {
-                std::int64_t q = r / newr;
-                std::int64_t tmp = 0;
-                tmp = t - q * newt; t = newt; newt = tmp;
-                tmp = r - q * newr; r = newr; newr = tmp;
+                u64      q   = r / newr;
+                __int128 tmp = t - (__int128)q * newt;
+                t = newt; newt = tmp;
+                u64 rr = r - q * newr; r = newr; newr = rr;
             }
             if(r != 1)
                 return n; // not invertible (zero-divisor)
             if(t < 0)
-                t += (std::int64_t)n;
+                t += (__int128)n;
             return (u64)t;
         }
 
@@ -308,8 +360,7 @@ namespace fpsan
                 return c.nan_code;
             if(alg_is_inf(c, a) || alg_is_inf(c, b))
                 return (alg_is_inf(c, a) && alg_is_inf(c, b)) ? c.nan_code : c.inf_code;
-            u64 s = a + b;
-            return s >= c.n ? s - c.n : s;
+            return alg_addmod(a, b, c.n);
         }
         FPSAN_HOST_DEVICE constexpr u64 alg_sub1(const AlgConfig& c, u64 a, u64 b)
         {
@@ -323,7 +374,7 @@ namespace fpsan
             const bool az = (alg_is_fin(c, a) && a == 0), bz = (alg_is_fin(c, b) && b == 0);
             if(ai || bi)
                 return (az || bz) ? c.nan_code : c.inf_code; // 0*Inf -> NaN
-            return (a * b) % c.n;
+            return alg_mulmod(a, b, c.n);
         }
         FPSAN_HOST_DEVICE constexpr u64 alg_div1(const AlgConfig& c, u64 a, u64 b)
         {
@@ -341,7 +392,7 @@ namespace fpsan
             const u64 inv = alg_inv(b, c.n);
             if(inv == c.n)
                 return c.nan_code; // zero-divisor (CRT variant) -> poison
-            return (a * inv) % c.n;
+            return alg_mulmod(a, inv, c.n);
         }
         FPSAN_HOST_DEVICE constexpr u64 alg_exp1(const AlgConfig& c, u64 a)
         {
@@ -376,7 +427,7 @@ namespace fpsan
             }
             u64 r = mag % c.n;
             u64 pw = e >= 0 ? alg_powmod(2, (u64)e, c.n) : alg_powmod(c.inv2, (u64)(-e), c.n);
-            r = (r * pw) % c.n;
+            r = alg_mulmod(r, pw, c.n);
             return sign ? (r == 0 ? 0 : c.n - r) : r;
         }
 
@@ -567,7 +618,7 @@ namespace fpsan
             {
                 if(cur == x)
                     return k;
-                cur = (cur * b) % q;
+                cur = alg_mulmod(cur, b, q);
             }
             return 0; // unreachable when x is in <b>
         }
@@ -634,6 +685,51 @@ namespace fpsan
         // g^k == (r mod p)^(d+1) (r's order-d component) in F_p, or c.d as an
         // out-of-range sentinel when r vanishes in the F_p factor. Shared by log
         // and log2; the brute-force scan is O(d) (a device path would table it).
+        // Pollard's rho discrete log in a cyclic group <gp> of PRIME order d in F_p:
+        // find k in [0,d) with gp^k == target. O(sqrt d) time and O(1) memory -- the
+        // device-friendly alternative to the O(d) scan, needed once d ~ 2^31 (the
+        // 64-bit Sophie Germain / Pythagorean channel; the scan would be ~3e9 steps).
+        // The walk stays inside <gp> (target is in it), tracking x = gp^a * target^b;
+        // a Floyd collision yields k = (a'-a)/(b-b') mod d (d prime => exact inverse).
+        // Deterministic restarts cover the rare degenerate (b == b') collision.
+        FPSAN_HOST_DEVICE constexpr void
+            alg_rho_step(u64& x, u64& a, u64& b, u64 gp, u64 target, u64 d, u64 p)
+        {
+            switch(x % 3)
+            {
+            case 0: x = alg_mulmod(x, target, p); b = (b + 1) % d; break;
+            case 1: x = alg_mulmod(x, x, p); a = (2 * a) % d; b = (2 * b) % d; break;
+            default: x = alg_mulmod(x, gp, p); a = (a + 1) % d; break;
+            }
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_dlog_rho(u64 target, u64 gp, u64 d, u64 p)
+        {
+            if(target == 1 % p)
+                return 0;
+            const u64 cap = (u64{1} << 21); // >> sqrt(d) for any 64-bit d; safety bound
+            for(u64 attempt = 1; attempt <= 16; ++attempt)
+            {
+                u64 a = attempt % d, b = 0;
+                u64 x = alg_powmod(gp, a, p);
+                u64 A = a, B = b, X = x;
+                for(u64 i = 0; i < cap; ++i)
+                {
+                    alg_rho_step(x, a, b, gp, target, d, p);
+                    alg_rho_step(X, A, B, gp, target, d, p);
+                    alg_rho_step(X, A, B, gp, target, d, p);
+                    if(x == X)
+                    {
+                        const u64 bb = (b + d - B) % d;
+                        if(bb == 0)
+                            break; // degenerate collision -- restart with a new offset
+                        const u64 aa   = (A + d - a) % d;
+                        const u64 binv = alg_powmod(bb, d - 2, d); // d prime: b^(d-2)=b^-1
+                        return alg_mulmod(aa, binv, d);
+                    }
+                }
+            }
+            return 0; // astronomically unlikely across 16 walks; payload then poisoned
+        }
         FPSAN_HOST_DEVICE constexpr u64 alg_dlog1(const AlgConfig& c, u64 r)
         {
             const u64 p  = c.n / c.d; // prime field factor (n = p*d)
@@ -642,12 +738,17 @@ namespace fpsan
                 return c.d; // sentinel: value vanishes in the F_p factor
             const u64 gp     = c.g % p;                  // order-d generator in F_p^*
             const u64 target = alg_powmod(rp, c.d + 1, p); // r's order-d component
-            u64       cur    = 1 % p;
+            // Small order: the exact O(d) scan (proven, used by fp8/16/32). Large
+            // order (64-bit, d ~ 2^31): Pollard's rho, O(sqrt d). Both return the
+            // same unique k in [0, d).
+            if(c.d > (u64{1} << 20))
+                return alg_dlog_rho(target, gp, c.d, p);
+            u64 cur = 1 % p;
             for(u64 k = 0; k < c.d; ++k)
             {
                 if(cur == target)
                     return k;
-                cur = (cur * gp) % p;
+                cur = alg_mulmod(cur, gp, p);
             }
             return c.d; // unreachable: target lies in <g>
         }
@@ -725,7 +826,7 @@ namespace fpsan
             if(k >= c.d)
                 return c.nan_code;
             const u64 Kinv = alg_powmod(K, c.d - 2, c.d); // K^(d-2) = K^-1 mod prime d
-            return ((c.n / c.d) * ((Kinv * k) % c.d)) % c.n;
+            return ((c.n / c.d) * alg_mulmod(Kinv, k, c.d)) % c.n;
         }
         FPSAN_HOST_DEVICE constexpr u64 alg_exp2_1(const AlgConfig& c, u64 a)
         { return alg_expb_1(c, a, alg_exp2_base(c.d), 0x65787032ull /*"exp2"*/); }
@@ -761,8 +862,8 @@ namespace fpsan
         FPSAN_HOST_DEVICE constexpr AlgC alg_cmul(AlgC a, AlgC b, u64 n)
         {
             // (ar+ai i)(br+bi i) = (ar br - ai bi) + (ar bi + ai br) i  mod n
-            const u64 re = ((a.re * b.re) % n + n - (a.im * b.im) % n) % n;
-            const u64 im = ((a.re * b.im) % n + (a.im * b.re) % n) % n;
+            const u64 re = alg_submod(alg_mulmod(a.re, b.re, n), alg_mulmod(a.im, b.im, n), n);
+            const u64 im = alg_addmod(alg_mulmod(a.re, b.im, n), alg_mulmod(a.im, b.re, n), n);
             return {re, im};
         }
         FPSAN_HOST_DEVICE constexpr AlgC alg_cpow(AlgC base, u64 e, u64 n)
