@@ -472,7 +472,7 @@ the channel it unlocks — not a claim that the whole ring is a field. Markers:
 | casts multiplicative: `cast<T>(x·y) == cast<T>(x)·cast<T>(y)` | ❌ | ✅ ⑪ | ❌ ⑯ | ❌ ⑯ |
 | casts compose: `cast<T>(cast<U>(x)) == cast<T>(x)` | ✅ ⑪ | ✅ ⑪ | ❌ ⑯ | ❌ ⑯ |
 | **— infinity & NaN —** | | | | |
-| `1/0` is a single unsigned `∞` (`+∞`, `−∞` identified) | ❌ ⑧ | ✅ | ✅ | ✅ |
+| `1/0 = ∞` | ❌ ⑧ | ✅ | ✅ | ✅ |
 | `1 / ∞ == 0` | ❌ ⑧ | ✅ | ✅ | ✅ |
 | `x + ∞ == ∞`, `x * ∞ == ∞` (finite `x ≠ 0`) | ❌ ⑧ | ✅ | ✅ | ✅ |
 | indeterminates `∞±∞`, `0*∞`, `∞/∞`, `0/0` → `NaN` | ❌ ⑧ | ✅ | ✅ | ✅ |
