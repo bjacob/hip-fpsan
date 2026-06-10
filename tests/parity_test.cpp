@@ -107,10 +107,11 @@ namespace
             EXPECT_EQ(d.storage_a, h.storage_a) << label << " storage_a @" << i;
             EXPECT_EQ(d.storage_neg, h.storage_neg) << label << " neg @" << i;
             EXPECT_EQ(d.b_is_zero, h.b_is_zero) << label << " b_is_zero @" << i;
-            // FPSan mode is integer/constexpr payload algebra: it MUST match
+            // Every FPSan-family mode (Triton free model AND the algebraic
+            // value models) is integer/constexpr payload algebra: it MUST match
             // bit-for-bit. Float mode is native hardware arithmetic, whose
             // rounding may differ host vs device -- out of scope here.
-            if constexpr(S == Semantics::FPSanLikeTriton)
+            if constexpr(S != Semantics::Native)
             {
                 EXPECT_EQ(d.storage_add, h.storage_add) << label << " add @" << i;
                 EXPECT_EQ(d.storage_sub, h.storage_sub) << label << " sub @" << i;
@@ -141,10 +142,11 @@ namespace
         for(int i = 0; i < n; ++i)
             host[i] = fpsan_test::parity_compute<FT, S, Cv>(a[i], b[i], c[i]);
 
-        // Host invariant on the shared body: in FPSan mode the payload ring laws
-        // are exact and must always hold. Float mode is native arithmetic, so no
-        // algebraic-law conformance is asserted.
-        if constexpr(S == Semantics::FPSanLikeTriton)
+        // Host invariant on the shared body: in every FPSan-family mode (Triton
+        // and the algebraic value models) the payload ring laws are exact and
+        // must always hold. Float mode is native arithmetic, so no algebraic-law
+        // conformance is asserted.
+        if constexpr(S != Semantics::Native)
             for(int i = 0; i < n; ++i)
                 EXPECT_EQ(host[i].laws & fpsan_test::kRingLaws, fpsan_test::kRingLaws)
                     << label << " ring law @" << i;
@@ -168,11 +170,27 @@ namespace
     PARITY_ONE(FT, TAG, FPSanLikeTriton, Implicit) \
     PARITY_ONE(FT, TAG, FPSanLikeTriton, Explicit)
 
+// The algebraic value models. Conversions is orthogonal to the payload algebra
+// here, so one representative (Explicit) per variant suffices. These apply at
+// every supported element width including double -- the algebraic semantics now
+// carry 64-bit element types via a 128-bit modular multiply (algebraic.hpp).
+#define PARITY_ALG_MODES(FT, TAG)                                   \
+    PARITY_ONE(FT, TAG, FPSanAlgebraicField, Explicit)              \
+    PARITY_ONE(FT, TAG, FPSanAlgebraicField2, Explicit)             \
+    PARITY_ONE(FT, TAG, FPSanAlgebraicRingSophieGermain, Explicit)  \
+    PARITY_ONE(FT, TAG, FPSanAlgebraicRingSophieGermain2, Explicit) \
+    PARITY_ONE(FT, TAG, FPSanAlgebraicRingPythagorean, Explicit)    \
+    PARITY_ONE(FT, TAG, FPSanAlgebraicRingPythagorean2, Explicit)
+
 PARITY_ALL_MODES(float, F32)
+PARITY_ALG_MODES(float, F32)
 PARITY_ALL_MODES(double, F64)
+PARITY_ALG_MODES(double, F64)
 #if FPSAN_HAS_FLOAT16
 PARITY_ALL_MODES(_Float16, F16)
+PARITY_ALG_MODES(_Float16, F16)
 #endif
 #if FPSAN_HAS_BF16
 PARITY_ALL_MODES(__bf16, BF16)
+PARITY_ALG_MODES(__bf16, BF16)
 #endif

@@ -64,6 +64,29 @@ function(fpsan_add_compile_fail_test name src)
   set_tests_properties(${name} PROPERTIES WILL_FAIL TRUE)
 endfunction()
 
+# Helper: a standalone host test that owns its main() and reports failure via a
+# nonzero exit code (no gtest). Compiled as plain C++ -- these are host-only and
+# need no GPU -- and registered to run directly.
+function(fpsan_add_plain_test name src)
+  add_executable(${name} ${src})
+  target_link_libraries(${name} PRIVATE fpsan::fpsan)
+  target_compile_features(${name} PRIVATE cxx_std_17)
+  add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+# Helper: a compile-only codegen test -- the source MUST compile (here, forcing
+# device codegen of an intrinsic through every Semantics). Built on demand via
+# ctest as an OBJECT (the source has no main); a compile failure fails the test.
+function(fpsan_add_codegen_test name src)
+  add_library(${name} OBJECT EXCLUDE_FROM_ALL ${src})
+  set_source_files_properties(${src} PROPERTIES LANGUAGE ${FPSAN_TEST_LANG})
+  target_link_libraries(${name} PRIVATE fpsan::fpsan)
+  set_target_properties(${name} PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD TRUE)
+  add_test(NAME ${name}
+           COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+                   --target ${name} --config $<CONFIG>)
+endfunction()
+
 # ---- build canary: proves the toolchain + INTERFACE target + ctest work even
 # before gtest is present.  Always built. -----------------------------------
 fpsan_add_test(fpsan_build_canary build_canary.cpp)
@@ -73,6 +96,12 @@ fpsan_add_compile_fail_test(fpsan_neg_cross_mode neg_cross_mode.cpp)
 fpsan_add_compile_fail_test(fpsan_neg_explicit_ctor neg_explicit_ctor.cpp)
 fpsan_add_compile_fail_test(fpsan_neg_explicit_mixed_pod neg_explicit_mixed_pod.cpp)
 fpsan_add_compile_fail_test(fpsan_neg_non_float_type neg_non_float_type.cpp)
+
+# ---- algebraic value-model tests (host-only, own main(), no gtest) ---------
+# Exhaustive checks of the algebraic Semantics across ALL variants including the
+# independent-prime "2" twins (the dedicated home for full-variant coverage).
+fpsan_add_plain_test(fpsan_algebraic_proto_test algebraic_proto_test.cpp)
+fpsan_add_plain_test(fpsan_algebraic_value_test algebraic_value_test.cpp)
 
 # ---- real test suite (requires gtest) --------------------------------------
 if(TARGET GTest::gtest_main)
@@ -106,6 +135,9 @@ if(TARGET GTest::gtest_main)
     endforeach()
     if(_fpsan_has_gfx12)
       fpsan_add_test(fpsan_wmma_test wmma_test.cpp)
+      # Compile-only: force gfx12 WMMA codegen through every Semantics (incl. the
+      # algebraic variants and their "2" twins) -- orthogonality at the GPU level.
+      fpsan_add_codegen_test(fpsan_algebraic_device_test algebraic_device_test.cpp)
       fpsan_add_test(fpsan_xlane_test xlane_test.cpp)
       fpsan_add_test(fpsan_amdgcn_math_test amdgcn_math_test.cpp)
       fpsan_add_test(fpsan_cvt_test cvt_test.cpp)

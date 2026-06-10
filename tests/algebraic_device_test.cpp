@@ -44,4 +44,12 @@ template __global__ void wmma_kernel<Semantics::FPSanLikeTriton>(const _Float16*
 template __global__ void
     wmma_kernel<Semantics::FPSanAlgebraicField>(const _Float16*, const _Float16*, float*);
 template __global__ void
+    wmma_kernel<Semantics::FPSanAlgebraicField2>(const _Float16*, const _Float16*, float*);
+template __global__ void
     wmma_kernel<Semantics::FPSanAlgebraicRingSophieGermain>(const _Float16*, const _Float16*, float*);
+template __global__ void
+    wmma_kernel<Semantics::FPSanAlgebraicRingSophieGermain2>(const _Float16*, const _Float16*, float*);
+template __global__ void
+    wmma_kernel<Semantics::FPSanAlgebraicRingPythagorean>(const _Float16*, const _Float16*, float*);
+template __global__ void
+    wmma_kernel<Semantics::FPSanAlgebraicRingPythagorean2>(const _Float16*, const _Float16*, float*);
