@@ -105,11 +105,6 @@ namespace fpsan
             return F(static_cast<FT>(NATIVE));                                                     \
         }                                                                                          \
     }
-    FPSAN_DEFINE_TAGGED_UNARY(sqrt, Sqrt, std::sqrt(v))
-    // precise_sqrt mirrors Triton's IEEE-correct sqrt: a distinct FPSan tag from
-    // `sqrt`, but the same correctly-rounded std::sqrt in Float mode.
-    FPSAN_DEFINE_TAGGED_UNARY(precise_sqrt, PreciseSqrt, std::sqrt(v))
-    FPSAN_DEFINE_TAGGED_UNARY(rsqrt, Rsqrt, detail::compute_t<FT>(1) / std::sqrt(v))
     FPSAN_DEFINE_TAGGED_UNARY(erf, Erf, std::erf(v))
     FPSAN_DEFINE_TAGGED_UNARY(floor, Floor, std::floor(v))
     FPSAN_DEFINE_TAGGED_UNARY(ceil, Ceil, std::ceil(v))
@@ -117,6 +112,52 @@ namespace fpsan
     FPSAN_DEFINE_TAGGED_UNARY(fract, Fract, v - std::floor(v))
     FPSAN_DEFINE_TAGGED_UNARY(tanh, Tanh, std::tanh(v))
 #undef FPSAN_DEFINE_TAGGED_UNARY
+
+    // sqrt / precise_sqrt / rsqrt / cbrt are ALGEBRAIC, not transcendental: the
+    // algebraic variants realize them as multiplicative power maps, so
+    // sqrt(x*y)==sqrt(x)*sqrt(y), cbrt(x*y)==cbrt(x)*cbrt(y), and rsqrt==1/sqrt
+    // hold exactly. FPSan/Triton keeps them tagged tokens. cbrt is a perfect cube
+    // root in the Field/Exp variants, a token in Trig (3 divides the group order).
+#define FPSAN_DEFINE_ALGEBRAIC_ROOT(NAME, OPID, ALG_FN, NATIVE)                                    \
+    template <class FT, Semantics S, Conversions C>                                                \
+    FPSAN_HOST_DEVICE Value<FT, S, C> NAME(Value<FT, S, C> x)                                      \
+    {                                                                                              \
+        using F = Value<FT, S, C>;                                                                 \
+        if constexpr(F::semantics == Semantics::FPSanLikeTriton)                                   \
+            return FPSAN_FROM_PAYLOAD(F,                                                           \
+                                      detail::payload_tagged_unary(                                \
+                                          F::config, x.fpsan_payload(), detail::UnaryOpId::OPID)); \
+        else if constexpr(F::is_algebraic)                                                         \
+            return FPSAN_FROM_PAYLOAD(F, detail::ALG_FN(F::alg_cfg(), x.fpsan_payload()));         \
+        else                                                                                       \
+        {                                                                                          \
+            const detail::compute_t<FT> v = static_cast<detail::compute_t<FT>>(x.to_float());      \
+            return F(static_cast<FT>(NATIVE));                                                     \
+        }                                                                                          \
+    }
+    FPSAN_DEFINE_ALGEBRAIC_ROOT(sqrt, Sqrt, alg_sqrt, std::sqrt(v))
+    // precise_sqrt: same algebraic value as sqrt, but a distinct FPSan tag (mirrors
+    // Triton's correctly-rounded sqrt) and the same std::sqrt in Float mode.
+    FPSAN_DEFINE_ALGEBRAIC_ROOT(precise_sqrt, PreciseSqrt, alg_sqrt, std::sqrt(v))
+    FPSAN_DEFINE_ALGEBRAIC_ROOT(rsqrt, Rsqrt, alg_rsqrt, detail::compute_t<FT>(1) / std::sqrt(v))
+#undef FPSAN_DEFINE_ALGEBRAIC_ROOT
+
+    // cbrt: Triton lowers it to a libdevice extern, so the FPSan mode tags it by
+    // symbol name (the generic extern fallback); the algebraic variants realize it
+    // as a power map (perfect cube root where has_cbrt).
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_HOST_DEVICE Value<FT, S, C> cbrt(Value<FT, S, C> x)
+    {
+        using F = Value<FT, S, C>;
+        if constexpr(F::semantics == Semantics::FPSanLikeTriton)
+            return FPSAN_FROM_PAYLOAD(
+                F, detail::payload_extern_tagged(
+                       F::config, detail::stable_string_hash("cbrt"), x.fpsan_payload()));
+        else if constexpr(F::is_algebraic)
+            return FPSAN_FROM_PAYLOAD(F, detail::alg_cbrt(F::alg_cfg(), x.fpsan_payload()));
+        else
+            return F(static_cast<FT>(std::cbrt(static_cast<detail::compute_t<FT>>(x.to_float()))));
+    }
 
     // log is special: the Exp variants honor log(x*y)=log(x)+log(y) via the
     // discrete log on the order-d channel (the dual of exp's g^(v mod d)); FPSan

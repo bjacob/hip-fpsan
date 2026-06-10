@@ -182,6 +182,77 @@ int main()
     check(log2(Alg{2.0f} * Alg{3.0f}) != log2(Alg{2.0f}) + log2(Alg{3.0f}),
           "field: log2 is NOT a homomorphism (tagged token)");
 
+    // ---- sqrt / cbrt / rsqrt: multiplicative algebraic roots ----
+    check(Alg::alg_cfg().has_cbrt, "field: cbrt is a perfect cube root (has_cbrt)");
+    {
+        long  ms = 0, mc = 0, c3 = 0, inset = 0, half = 0, n = 0;
+        float xs[] = {1.f, 2.f, 3.f, 5.f, 7.f, 0.5f, 1.5f, 6.f, 9.f, 0.25f, 11.f, 13.f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Alg a{u}, b{v};
+                ms += (sqrt(a * b) == sqrt(a) * sqrt(b));   // sqrt multiplicative
+                mc += (cbrt(a * b) == cbrt(a) * cbrt(b));   // cbrt multiplicative
+                c3 += (cbrt(a) * cbrt(a) * cbrt(a) == a);   // cbrt perfect: cbrt(x)^3==x
+                Alg s2 = sqrt(a) * sqrt(a);
+                inset += ((s2 == a) || (s2 == -a));         // sqrt(x)^2 == +/- x always
+                half += (s2 == a);                          // == x on the squares (~half)
+                ++n;
+            }
+        check(ms == n, "field sqrt: sqrt(x*y) == sqrt(x)*sqrt(y) (multiplicative)");
+        check(mc == n, "field cbrt: cbrt(x*y) == cbrt(x)*cbrt(y) (multiplicative)");
+        check(c3 == n, "field cbrt: cbrt(x)^3 == x (perfect)");
+        check(inset == n, "field sqrt: sqrt(x)^2 in {x, -x} always");
+        check(half > 0 && half < n, "field sqrt: round-trip sqrt(x)^2==x on ~half (QRs)");
+    }
+    // rsqrt is exactly 1/sqrt
+    {
+        long  ok = 0, cons = 0, n = 0;
+        float xs[] = {1.f, 2.f, 3.f, 5.f, 0.5f, 4.f, 9.f, 7.f};
+        for(float u : xs)
+        {
+            Alg a{u};
+            ok += (rsqrt(a) * sqrt(a) == Alg{1.0f});
+            cons += (rsqrt(a) == Alg{1.0f} / sqrt(a));
+            ++n;
+        }
+        check(ok == n, "field rsqrt: rsqrt(x)*sqrt(x) == 1");
+        check(cons == n, "field rsqrt == 1/sqrt");
+    }
+    // Exp variant: sqrt multiplicative, cbrt a perfect cube root (3 coprime to lambda)
+    check(Exp::alg_cfg().has_cbrt, "exp: cbrt is a perfect cube root (has_cbrt)");
+    {
+        long  ms = 0, c3 = 0, n = 0;
+        float xs[] = {1.f, 2.f, 3.f, 5.f, 7.f, 0.5f, 1.5f, 6.f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                ms += (sqrt(a * b) == sqrt(a) * sqrt(b));
+                c3 += (cbrt(a) * cbrt(a) * cbrt(a) == a);
+                ++n;
+            }
+        check(ms == n, "exp sqrt: multiplicative");
+        check(c3 == n, "exp cbrt: cbrt(x)^3 == x (perfect)");
+    }
+    // Trig variant: sqrt multiplicative; cbrt has no cube root here (3 | group order)
+    check(!Trig::alg_cfg().has_cbrt, "trig: cbrt is a token (3 divides the group order)");
+    {
+        long  ms = 0, n = 0;
+        float xs[] = {1.f, 2.f, 3.f, 5.f, 0.5f, 1.5f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Trig a{u}, b{v};
+                ms += (sqrt(a * b) == sqrt(a) * sqrt(b));
+                ++n;
+            }
+        check(ms == n, "trig sqrt: multiplicative");
+    }
+    // contrast: the free model's sqrt is a tagged token (not multiplicative)
+    check(sqrt(Scr{2.0f} * Scr{3.0f}) != sqrt(Scr{2.0f}) * sqrt(Scr{3.0f}),
+          "fpsan free model: sqrt is a token (not multiplicative)");
+
     // ---- Inf / NaN reach the payload, via 1/0 ----
     check(((Alg{1.0f} / Alg{0.0f}) / (Alg{1.0f} / Alg{0.0f})) == (Alg{1.0f} / Alg{0.0f}) /
               (Alg{1.0f} / Alg{0.0f}),

@@ -69,7 +69,15 @@ namespace fpsan
         };
 
         // ---- the constants table (the only per-(variant x width) data) ----------
-        // Field primes leave >= 2 codes free (Inf, NaN sentinels). Exp pairs are
+        // Field primes leave >= 2 codes free (Inf, NaN sentinels). All are
+        // p == 11 (mod 12), which gives two algebraic structures for free:
+        //   * sqrt as a multiplicative map with 1/2 round-trip coverage (p==3 mod 4)
+        //   * cbrt as a PERFECT multiplicative cube root (3 coprime to p-1, p==2 mod 3)
+        // and, across widths, p_w - 1 forms a divisibility chain
+        //   fp4(10) | fp8 | fp16 | fp32   (fp6 is standalone)
+        // so widening casts fp4/fp8/fp16 -> wider are multiplicative homomorphisms
+        // (see alg_cast1). Variant 1 and 2 are two independent chains sharing only
+        // fp4 = 11 (the only 11-mod-12 prime that fits 4 bits). Exp pairs are
         // Sophie-Germain (p = 2d+1); g has order d in (Z/n)^*.  64-bit (double) is
         // not wired yet (needs 128-bit modular multiply); it static_asserts below.
         FPSAN_HOST_DEVICE constexpr u64 alg_field_prime(AlgVariant v, unsigned w)
@@ -78,11 +86,11 @@ namespace fpsan
                             || v == AlgVariant::Trig1);
             switch(w)
             {
-            case 4: return a ? 13u : 11u;
-            case 6: return a ? 61u : 59u;
-            case 8: return a ? 251u : 241u;
-            case 16: return a ? 65521u : 65519u;
-            case 32: return a ? 4294967291u : 4294967279u;
+            case 4: return 11u; // shared: only 11-mod-12 prime that fits 4 bits
+            case 6: return a ? 59u : 47u; // standalone (not in the cast chain)
+            case 8: return a ? 191u : 251u;
+            case 16: return a ? 65171u : 61751u;
+            case 32: return a ? 4293073751u : 4290451751u;
             default: return 0;
             }
         }
@@ -143,6 +151,12 @@ namespace fpsan
             return {alg_field_prime(v, w), 0u, 0u, false};
         }
 
+        FPSAN_HOST_DEVICE constexpr u64 alg_gcd(u64 a, u64 b)
+        {
+            while(b) { u64 t = a % b; a = b; b = t; }
+            return a;
+        }
+
         // ---- the per-Value configuration (analogous to MixConfig) ----------------
         struct AlgConfig
         {
@@ -156,6 +170,13 @@ namespace fpsan
             u64  omega_re = 0; // order-d rotation element of (Z/n)[i], for sin/cos
             u64  omega_im = 0;
             bool has_trig = false;
+            // multiplicative root exponents (power maps x^e on units): sqrt and its
+            // reciprocal rsqrt always available; cbrt only where 3 is coprime to the
+            // group exponent (has_cbrt: Field/Exp, not Trig).
+            u64  sqrt_exp  = 0;
+            u64  rsqrt_exp = 0;
+            u64  cbrt_exp  = 0;
+            bool has_cbrt  = false;
             // decoded float format of the element type:
             unsigned bit_width = 0;
             unsigned mant_bits = 0;
@@ -190,6 +211,18 @@ namespace fpsan
             c.mant_mask   = (u64{1} << T::mantissa_bits) - 1;
             c.exp_max     = (u64{1} << T::exponent_bits) - 1;
             c.has_inf_nan = true; // IEEE-style types; sub-byte specifics TBD
+            // Root power maps. lam = exponent of the unit group (Carmichael):
+            // n-1 for a prime field, lcm(p-1, d-1) for the composite Exp/Trig ring.
+            const u64 pf  = c.two_moduli ? (c.n / c.d) : c.n;        // F_p factor
+            const u64 lam = c.two_moduli
+                                ? (pf - 1) / alg_gcd(pf - 1, c.d - 1) * (c.d - 1)
+                                : (c.n - 1);
+            u64 lam_odd = lam;
+            while(lam_odd % 2 == 0) lam_odd /= 2;
+            c.sqrt_exp  = (lam_odd + 1) / 2; // 2^{-1} mod (odd part): best sqrt coverage
+            c.rsqrt_exp = lam - c.sqrt_exp;  // x^rsqrt_exp == sqrt(x)^{-1} on units
+            c.has_cbrt  = (lam % 3 != 0);    // 3 invertible mod lam -> perfect cbrt
+            c.cbrt_exp  = !c.has_cbrt ? 0 : (lam % 3 == 1 ? (1 + 2 * lam) / 3 : (1 + lam) / 3);
             return c;
         }
 
@@ -425,6 +458,51 @@ namespace fpsan
         {
             return alg_lanewise1(a, [&](u64 x) { return alg_tagged1(c, x, tag); });
         }
+
+        // ---- multiplicative roots: sqrt, rsqrt, cbrt (power maps x^e on units) ----
+        // sqrt/cbrt are ALGEBRAIC (not transcendental): a fixed-exponent power map,
+        // so sqrt(x*y)==sqrt(x)*sqrt(y) and cbrt(x*y)==cbrt(x)*cbrt(y) hold exactly
+        // for every modulus, and rsqrt==1/sqrt is consistent. The round-trip
+        // sqrt(x)^2==x holds on the square residues (~1/2 of a prime field), and
+        // cbrt(x)^3==x holds for ALL x where has_cbrt (3 coprime to the group
+        // exponent). Where 3 divides it (Trig), cbrt falls back to a tagged token.
+        FPSAN_HOST_DEVICE constexpr u64 alg_sqrt1(const AlgConfig& c, u64 x)
+        {
+            if(alg_is_nan(c, x)) return c.nan_code;
+            if(alg_is_inf(c, x)) return c.inf_code;      // sqrt(Inf) = Inf
+            return alg_powmod(x, c.sqrt_exp, c.n);        // sqrt(0) = 0
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_rsqrt1(const AlgConfig& c, u64 x)
+        {
+            if(alg_is_nan(c, x)) return c.nan_code;
+            if(alg_is_inf(c, x)) return 0;                // 1/sqrt(Inf) = 0
+            if(x == 0) return c.inf_code;                 // 1/sqrt(0) = Inf
+            return alg_powmod(x, c.rsqrt_exp, c.n);
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_cbrt1(const AlgConfig& c, u64 x)
+        {
+            if(!c.has_cbrt)
+                return alg_tagged1(c, x, 0x63627274ull /*"cbrt"*/);
+            if(alg_is_nan(c, x)) return c.nan_code;
+            if(alg_is_inf(c, x)) return c.inf_code;       // cbrt(Inf) = Inf
+            return alg_powmod(x, c.cbrt_exp, c.n);         // cbrt(0) = 0
+        }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_sqrt(const AlgConfig& c, Bits x)
+        {
+            return alg_lanewise1(x, [&](u64 v) { return alg_sqrt1(c, v); });
+        }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_rsqrt(const AlgConfig& c, Bits x)
+        {
+            return alg_lanewise1(x, [&](u64 v) { return alg_rsqrt1(c, v); });
+        }
+        template <class Bits>
+        FPSAN_HOST_DEVICE constexpr Bits alg_cbrt(const AlgConfig& c, Bits x)
+        {
+            return alg_lanewise1(x, [&](u64 v) { return alg_cbrt1(c, v); });
+        }
+
         // Binary tagged token (e.g. fmod): deterministic in both operands.
         FPSAN_HOST_DEVICE constexpr u64 alg_tagged2_1(const AlgConfig& c, u64 a, u64 b, u64 tag)
         {
